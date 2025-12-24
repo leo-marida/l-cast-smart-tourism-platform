@@ -128,3 +128,52 @@ app.get('/api/pois/:id/feed', async (req, res) => {
   );
   res.json(result.rows);
 });
+
+// Get my Itinerary
+app.get('/api/itinerary', async (req, res) => {
+  const result = await pool.query(
+    'SELECT i.visit_date, p.name, p.region FROM itineraries i JOIN pois p ON i.poi_id = p.id WHERE i.user_id = $1 ORDER BY i.visit_date ASC',
+    [req.user.id]
+  );
+  res.json(result.rows);
+});
+
+app.get('/api/discover', async (req, res) => {
+  try {
+    // 1. Fetch from Postgres (Always works)
+    const poiQuery = await pool.query('SELECT ... FROM pois LIMIT 20');
+    const candidates = poiQuery.rows;
+
+    // 2. Try the Python Inference Service (The Circuit Breaker Pattern)
+    try {
+        const response = await axios.post('http://inference-service:8000/v1/recommend', 
+            { user_prefs: req.user.prefs, poi_candidates: candidates },
+            { timeout: 2000, headers: { 'X-Internal-Key': process.env.INTERNAL_SERVICE_KEY } }
+        );
+        return res.json(response.data);
+    } catch (mlError) {
+        // FALLBACK: If Brain is dead, return raw list (Graceful Degradation)
+        console.warn("Inference Service Down - Using Fallback Logic");
+        return res.json({ 
+            status: "fallback", 
+            data: candidates, 
+            message: "Safety rankings temporarily offline. Showing all sites." 
+        });
+    }
+  } catch (err) {
+    res.status(500).json({ error: "System Critical Failure" });
+  }
+});
+
+// Save a POI to my Itinerary
+app.post('/api/itinerary', async (req, res) => {
+  const { poi_id, date } = req.body;
+  try {
+    await pool.query('INSERT INTO itineraries (user_id, poi_id, visit_date) VALUES ($1, $2, $3)', 
+      [req.user.id, poi_id, date]);
+    res.json({ message: "Added to your Lebanon itinerary!" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to save itinerary" });
+  }
+});
+

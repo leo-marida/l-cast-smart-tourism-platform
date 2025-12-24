@@ -25,3 +25,11 @@ CREATE TABLE pois (
 
 -- Indexing for high-performance geospatial queries (CLO3 Rigor)
 CREATE INDEX poi_location_idx ON pois USING GIST (location);
+
+CREATE TABLE itineraries (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    poi_id INTEGER REFERENCES pois(id),
+    visit_date DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

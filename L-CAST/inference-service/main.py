@@ -29,3 +29,17 @@ async def get_results(payload: dict, api_key: str = Security(get_api_key)):
         return {"status": "success", "data": recommendations}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/v1/update-feedback")
+async def update_feedback(payload: dict):
+    """
+    Automatically adjust the User's Interest Vector based on behavior.
+    If they click a 'Nature' site, we bump their Nature preference by 0.02.
+    """
+    current_vector = np.array(payload['current_vector'])
+    poi_category_index = payload['category_index'] # e.g., Nature = 3
+    
+    # Reinforcement Learning: Slowly shift the vector toward their actions
+    current_vector[poi_category_index] = min(1.0, current_vector[poi_category_index] + 0.02)
+    
+    return {"new_vector": current_vector.tolist()}
