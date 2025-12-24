@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>L-CAST Admin | Command Center</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: white; padding: 40px; }
+        .card { background: #16213e; padding: 25px; border-radius: 15px; border: 1px solid #0f3460; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        h1 { color: #e94560; margin-bottom: 10px; }
+        .btn-deploy { background: #e94560; color: white; padding: 12px 25px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        .btn-deploy:hover { background: #ff4d6d; }
+        select, input { padding: 10px; border-radius: 5px; background: #0f3460; color: white; border: 1px solid #533483; margin-right: 10px; }
+        .status-light { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #00ff00; margin-right: 5px; }
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <h1>L-CAST Crisis Management 🛰️</h1>
+        <p><span class="status-light"></span> System Status: <strong>Real-Time Sync Active</strong></p>
+        <hr style="border: 0.5px solid #0f3460; margin: 20px 0;">
+        
+        <h3>Manual Friction Override</h3>
+        <p>Select a region in Lebanon to simulate hyper-local volatility (Friction).</p>
+        
+        <label for="targetRegion">Target Region</label><br>
+        <select id="targetRegion">
+            <option value="Batroun">Batroun</option>
+            <option value="Zahle">Zahle</option>
+            <option value="Tripoli">Tripoli</option>
+            <option value="Beirut">Beirut</option>
+            <option value="Tyr">Tyr</option>
+        </select>
+
+        <label for="frictionType">Friction Type</label><br>
+        <select id="frictionType">
+            <option value="Road Blockage">Road Blockage</option>
+            <option value="Extreme Flooding">Extreme Flooding</option>
+            <option value="High Security Risk">High Security Risk</option>
+            <option value="Fuel Crisis">Fuel Crisis</option>
+        </select>
+
+        <button class="btn-deploy" onclick="deployCrisis()">DEPLOY FRICTION EVENT</button>
+
+        <div id="log" style="margin-top: 20px; font-size: 14px; color: #aaa;"></div>
+    </div>
+
+    <script>
+        async function deployCrisis() {
+            const region = document.getElementById('targetRegion').value;
+            const type = document.getElementById('frictionType').value;
+            const log = document.getElementById('log');
+
+            try {
+                // Call the Admin endpoint we created in Step 6
+                const response = await fetch('http://localhost:3000/admin/simulate-crisis', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ region, type })
+                });
+
+                if (response.ok) {
+                    log.innerHTML = `[${new Date().toLocaleTimeString()}] ✅ Event deployed to ${region}: ${type}. Recommender list updated.`;
+                }
+            } catch (e) {
+                log.innerHTML = `❌ Error: Check if Gateway Service is running.`;
+            }
+        }
+    </script>
+</body>
+</html>

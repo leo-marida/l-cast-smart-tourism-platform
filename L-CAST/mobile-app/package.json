@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-navigation/native": "^7.1.26",
+    "@react-navigation/stack": "^7.6.13",
+    "axios": "^1.13.2",
+    "lucide-react-native": "^0.562.0",
+    "react-native-maps": "^1.26.20"
+  }
+}

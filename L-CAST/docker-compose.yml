@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # Python ML Brain
+  inference-service:
+    build: ./inference-service
+    env_file: .env
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostGIS for Geospatial Queries (High CS Rigor)
+  database:
+    image: postgis/postgis:15-3.3
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  # Graph DB for Social Connections (CLO3: Polyglot Persistence)
+  graph-db:
+    image: neo4j:5.12
+    ports:
+      - "7474:7474" # Browser UI
+      - "7687:7687" # Bolt Protocol
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
+    volumes:
+      - neo4j_data:/data
+
+  # Redis for Caching (High Performance)
+  cache:
+    image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres_data:
+  neo4j_data:
