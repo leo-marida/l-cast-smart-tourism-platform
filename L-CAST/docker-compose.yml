@@ -6,6 +6,8 @@ services:
     build: ./inference-service
     env_file: .env
     restart: always
+    ports:                 
+      - "8000:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
       interval: 30s
