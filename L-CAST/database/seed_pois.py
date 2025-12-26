@@ -27,7 +27,7 @@ lebanon_pois = [
 
 def seed_db():
     conn = psycopg2.connect(
-        host="localhost",
+        host="database",
         database=os.getenv("POSTGRES_DB"),
         user=os.getenv("POSTGRES_USER"),
         password=os.getenv("POSTGRES_PASSWORD")

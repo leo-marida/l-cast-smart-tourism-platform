@@ -2,7 +2,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Replace with your Laptop's IP Address so the phone can see the server
-const BASE_URL = 'http://192.168.56.1:3000'; 
+const BASE_URL = 'http://192.168.0.104:3000'; 
 
 const api = axios.create({
   baseURL: BASE_URL,

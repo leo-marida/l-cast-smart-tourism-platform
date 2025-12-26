@@ -1,10 +1,27 @@
 
 services:
+  gateway:
+    build: ./gateway-service
+    ports:
+      - "3000:3000"
+    env_file: .env
+    environment:
+      - POSTGRES_HOST=database
+      - REDIS_HOST=cache
+      - NEO4J_HOST=graph-db
+      - INFERENCE_HOST=inference-service
+    depends_on:
+      - database
+      - cache
+      - graph-db
+      - inference-service
   # Python ML Brain
   inference-service:
     build: ./inference-service
     env_file: .env
     restart: always
+    environment:                 
+      - PYTHONUNBUFFERED=1
     ports:                 
       - "8000:8000"
     healthcheck:
