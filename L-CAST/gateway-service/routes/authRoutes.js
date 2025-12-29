@@ -14,6 +14,8 @@ const pool = new Pool({
 router.post('/register', async (req, res) => {
     const { username, email, password, interest_vector } = req.body;
     // Hash password (Security Standard)
+    const cleanEmail = email.trim().toLowerCase(); 
+    
     const hash = await bcrypt.hash(password, 10);
     
     try {
@@ -29,23 +31,45 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', async (req, res) => {
     const { email, password } = req.body;
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     
-    if (result.rows.length === 0) return res.status(401).json({ error: 'Invalid User' });
+    // 1. Sanitize Input (Fixes the mobile keyboard space bug)
+    const cleanEmail = email.trim().toLowerCase();
     
-    const user = result.rows[0];
-    const valid = await bcrypt.compare(password, user.password_hash);
-    
-    if (!valid) return res.status(401).json({ error: 'Invalid Password' });
+    console.log(`Login attempt for: '${cleanEmail}'`); // Debug Log
 
-    // Generate Token
-    const token = jwt.sign(
-        { id: user.id, role: user.role, interests: user.interest_vector }, 
-        process.env.JWT_SECRET, 
-        { expiresIn: '24h' }
-    );
-    
-    res.json({ token, username: user.username, role: user.role });
+    try {
+        // 2. Find User
+        const result = await pool.query('SELECT * FROM users WHERE email = $1', [cleanEmail]);
+        
+        if (result.rows.length === 0) {
+            console.log("User not found");
+            return res.status(401).json({ error: 'Invalid User (Email not found)' });
+        }
+        
+        const user = result.rows[0];
+        
+        // 3. Check Password
+        const valid = await bcrypt.compare(password, user.password_hash);
+        
+        if (!valid) {
+            console.log("Wrong password");
+            return res.status(401).json({ error: 'Invalid Password' });
+        }
+
+        // 4. Generate Token
+        const token = jwt.sign(
+            { id: user.id, role: user.role, interests: user.interest_vector }, 
+            process.env.JWT_SECRET, 
+            { expiresIn: '24h' }
+        );
+        
+        res.json({ token, username: user.username, role: user.role });
+
+    } catch (err) {
+        console.error("Login System Error:", err);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
 });
+
 
 module.exports = router;

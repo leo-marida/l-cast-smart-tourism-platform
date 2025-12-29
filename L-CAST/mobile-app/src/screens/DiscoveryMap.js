@@ -2,17 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, Linking } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import * as Location from 'expo-location';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import api from '../services/api';
-// IMPORT THE KEY SECURELY
 import { GOOGLE_MAPS_API_KEY } from '@env'; 
 
-export default function DiscoveryMap() {
+// 1. ADD 'route' TO PROPS so we can receive data from Home
+export default function DiscoveryMap({ route }) {
   const [location, setLocation] = useState(null);
   const [pois, setPois] = useState([]);
   const [selectedPoi, setSelectedPoi] = useState(null);
   const [routeCoords, setRouteCoords] = useState([]);
   const [travelTime, setTravelTime] = useState(null);
 
+  // Initial Setup: Get Permission & Current Location
   useEffect(() => {
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
@@ -20,14 +22,29 @@ export default function DiscoveryMap() {
 
       let loc = await Location.getCurrentPositionAsync({});
       setLocation(loc.coords);
+      
+      // Fetch all POIs to display on map
       fetchPois(loc.coords.latitude, loc.coords.longitude);
     })();
   }, []);
 
+  // 2. NEW LOGIC: Listen for "Home Screen Click"
+  // If user clicked a card in Home, 'route.params' will contain that POI
+  useEffect(() => {
+    if (route.params?.targetPoi) {
+      const target = route.params.targetPoi;
+      console.log("Received Navigation Target:", target.name);
+      
+      // Trigger the same logic as if we clicked the marker manually
+      onMarkerPress(target);
+    }
+  }, [route.params]);
+
   const fetchPois = async (lat, lon) => {
     try {
-      const res = await api.get(`/api/discover?lat=${lat}&lon=${lon}`);
-      setPois(res.data.data || []);
+      const res = await api.get(`/api/pois/discover?lat=${lat}&lon=${lon}`);
+      const data = Array.isArray(res.data) ? res.data : (res.data.data || []);
+      setPois(data);
     } catch (err) {
       console.error(err);
     }
@@ -36,24 +53,24 @@ export default function DiscoveryMap() {
   const getRoutePreview = async (destination) => {
     if (!location) return;
     
-    // SECURE USE OF ENV VAR
-    const origin = `${location.latitude},${location.longitude}`;
-    const dest = `${destination.lat},${destination.lon}`;
+    // Handle different data structures (lat vs coordinates[1])
+    const destLat = destination.lat || (destination.location ? destination.location.coordinates[1] : 0);
+    const destLon = destination.lon || (destination.location ? destination.location.coordinates[0] : 0);
     
+    const origin = `${location.latitude},${location.longitude}`;
+    const dest = `${destLat},${destLon}`;
+
     try {
       const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${dest}&key=${GOOGLE_MAPS_API_KEY}`;
       const resp = await fetch(url);
       const data = await resp.json();
       
-      if (data.routes.length) {
-        // Simple decode for MVP (Just start and end points if no decoder lib)
-        const points = [
+      if (data.routes && data.routes.length > 0) {
+        // Simple straight line for MVP visualization
+        setRouteCoords([
             { latitude: location.latitude, longitude: location.longitude },
-            { latitude: destination.lat, longitude: destination.lon }
-        ];
-        // If you install @mapbox/polyline later, decode data.routes[0].overview_polyline.points here
-        
-        setRouteCoords(points);
+            { latitude: destLat, longitude: destLon }
+        ]);
         setTravelTime(data.routes[0].legs[0].duration.text);
       }
     } catch (error) {
@@ -62,15 +79,19 @@ export default function DiscoveryMap() {
   };
 
   const onMarkerPress = (poi) => {
+    // Save selected POI to state to show the bottom card
     setSelectedPoi(poi);
     setTravelTime(null);
     setRouteCoords([]);
+    // Calculate the route
     getRoutePreview(poi);
   };
 
   const handleNavigate = () => {
     if (!location || !selectedPoi) return;
-    const url = `https://www.google.com/maps/dir/?api=1&origin=${location.latitude},${location.longitude}&destination=${selectedPoi.lat},${selectedPoi.lon}&travelmode=driving`;
+    const destLat = selectedPoi.lat || selectedPoi.location?.coordinates[1];
+    const destLon = selectedPoi.lon || selectedPoi.location?.coordinates[0];
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${location.latitude},${location.longitude}&destination=${destLat},${destLon}&travelmode=driving`;
     Linking.openURL(url);
   };
 
@@ -79,20 +100,28 @@ export default function DiscoveryMap() {
       <MapView 
         style={styles.map} 
         showsUserLocation={true}
-        initialRegion={{
-          latitude: 33.8938, longitude: 35.5018,
-          latitudeDelta: 0.1, longitudeDelta: 0.1,
+        // If we have a selected POI, center map on it. Otherwise default to Beirut.
+        region={{
+          latitude: selectedPoi ? (selectedPoi.lat || selectedPoi.location.coordinates[1]) : 33.8938,
+          longitude: selectedPoi ? (selectedPoi.lon || selectedPoi.location.coordinates[0]) : 35.5018,
+          latitudeDelta: 0.1,
+          longitudeDelta: 0.1,
         }}
       >
-        {pois.map((poi, index) => (
-          <Marker
-            key={index}
-            coordinate={{ latitude: poi.lat, longitude: poi.lon }}
-            title={poi.name}
-            pinColor={poi.friction_index < 0.6 ? 'red' : 'green'}
-            onPress={() => onMarkerPress(poi)}
-          />
-        ))}
+        {pois.map((poi, index) => {
+           const lat = poi.lat || (poi.location ? poi.location.coordinates[1] : 33.8938);
+           const lon = poi.lon || (poi.location ? poi.location.coordinates[0] : 35.5018);
+
+           return (
+            <Marker
+                key={index}
+                coordinate={{ latitude: lat, longitude: lon }}
+                title={poi.name}
+                pinColor={poi.friction_index < 0.8 ? 'red' : 'green'} 
+                onPress={() => onMarkerPress(poi)}
+            />
+           )
+        })}
         {routeCoords.length > 0 && <Polyline coordinates={routeCoords} strokeWidth={4} strokeColor="#4285F4" />}
       </MapView>
 
@@ -100,9 +129,12 @@ export default function DiscoveryMap() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{selectedPoi.name}</Text>
           {travelTime && <Text style={styles.timeText}>⏱️ {travelTime} drive</Text>}
-          <Text style={styles.desc}>{selectedPoi.xai_explanation}</Text>
+          <Text style={styles.desc}>{selectedPoi.xai_explanation || selectedPoi.description}</Text>
           <TouchableOpacity style={styles.navBtn} onPress={handleNavigate}>
             <Text style={styles.navText}>Open in Google Maps</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setSelectedPoi(null)} style={{marginTop:10, alignSelf:'center'}}>
+              <Text style={{color:'gray'}}>Close</Text>
           </TouchableOpacity>
         </View>
       )}

@@ -33,38 +33,42 @@ model = load_robust_model()
 friction_engine = FrictionEngine()
 
 class LCastRecommender:
+    # ... inside LCastRecommender class ...
+
     def recommend(self, user_preferences_string, poi_list):
-        """
-        poi_list: List of dicts {id, name, description, lat, lon, region}
-        """
-        # 1. Convert user text to vector
         user_vector = model.encode([user_preferences_string])
-        
         results = []
+        
         for poi in poi_list:
-            # 2. Content-Based Score
-            poi_desc = poi.get('description') or poi.get('name') # Fallback if desc is empty
+            # 1. Similarity
+            poi_desc = poi.get('description') or poi.get('name')
             poi_vector = model.encode([poi_desc])
-            
             sim_score = cosine_similarity(user_vector, [poi_vector])[0][0]
             
-            # 3. Real-time Friction
-            mu, reasons = friction_engine.calculate_final_mu(poi['lat'], poi['lon'], poi['region'])
+            # 2. Friction (Now returns detailed factors)
+            mu, factors = friction_engine.calculate_final_mu(poi['lat'], poi['lon'], poi['region'])
             
+            # 3. Hybrid Score
+            # We want to show LOW score items too, so we don't filter them out here.
             final_score = sim_score * mu
             
             results.append({
-                "poi_id": poi['id'],
+                "id": poi['id'],
                 "name": poi['name'],
+                "region": poi['region'],
                 "final_score": float(final_score),
-                "mu_applied": mu,
-                "safety_reasons": reasons,
-                "xai_explanation": self.generate_xai(sim_score, mu, reasons)
+                "match_rate": float(sim_score),
+                "friction_index": float(mu),
+                "safety_factors": factors, # <--- Sending the Breakdown!
+                "xai_explanation": self.generate_xai(sim_score, mu)
             })
             
-        return sorted(results, key=lambda x: x['final_score'], reverse=True)[:10]
+        # Return ALL results (sorted) so frontend can show bad ones too
+        return sorted(results, key=lambda x: x['final_score'], reverse=True)
 
-    def generate_xai(self, sim, mu, reasons):
+    def generate_xai(self, sim, mu):
+        # Simplified XAI string since we have badges now
+        return f"Interest Match: {int(sim*100)}%"
         base = f"This matches {int(sim*100)}% of your profile."
         if mu < 1.0:
             return base + f" Warning: Visibility reduced due to {', '.join(reasons)}."

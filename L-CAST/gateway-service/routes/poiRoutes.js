@@ -2,20 +2,21 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const { Pool } = require('pg');
-const pool = new Pool({
-    host: process.env.POSTGRES_HOST,
-    user: process.env.POSTGRES_USER,
-    password: process.env.POSTGRES_PASSWORD,
-    database: process.env.POSTGRES_DB
-});
 const auth = require('../middleware/auth');
 
-// DISCOVERY ENGINE (The Core Feature)
+const pool = new Pool({
+  host: process.env.POSTGRES_HOST,
+  user: process.env.POSTGRES_USER,
+  password: process.env.POSTGRES_PASSWORD,
+  database: process.env.POSTGRES_DB
+});
+
+// 1. DISCOVER (The Master Fix)
 router.get('/discover', auth, async (req, res) => {
-    const { lat, lon, radius = 20000 } = req.query;
+    const { lat, lon, radius = 100000 } = req.query;
 
     try {
-        // 1. Fetch Candidates (PostGIS)
+        // A. Fetch Candidates from Database
         const candidates = await pool.query(`
             SELECT id, name, description, region, image_url, base_popularity_score,
             ST_X(location::geometry) as lon, ST_Y(location::geometry) as lat
@@ -23,18 +24,37 @@ router.get('/discover', auth, async (req, res) => {
             WHERE ST_DWithin(location, ST_MakePoint($1, $2)::geography, $3)
         `, [lon, lat, radius]);
 
-        // 2. Call Python Inference Service (Friction Index)
+        // B. Fetch Saved IDs (Wishlist)
+        const savedRes = await pool.query('SELECT poi_id FROM itineraries WHERE user_id = $1', [req.user.id]);
+        const savedIds = new Set(savedRes.rows.map(r => r.poi_id));
+
+        // C. Call Python Brain (Calculates Friction & Explanations)
         try {
-            const mlResponse = await axios.post('http://inference-service:8000/rank', {
+            const mlResponse = await axios.post('http://inference-service:8000/v1/recommend', {
                 user_id: req.user.id,
-                candidates: candidates.rows,
-                current_weather: "Rainy", // In real app, fetch from OpenWeatherMap here
-                traffic_status: "High"    // In real app, fetch from Google Traffic
+                user_interest_profile: "General", 
+                candidates: candidates.rows // Send raw data to AI
             });
-            res.json(mlResponse.data); // Returns re-ranked list with friction applied
+
+            // D. Merge "Saved Status" into AI Results
+            // The AI returns enriched data (friction_index, factors), we just need to add 'is_saved' back
+            const finalResults = mlResponse.data.map(poi => ({
+                ...poi,
+                is_saved: savedIds.has(poi.id)
+            }));
+
+            res.json(finalResults);
+
         } catch (mlError) {
-            console.error("ML Service Down, returning raw distance list (Graceful Degradation)");
-            res.json(candidates.rows);
+            console.error("ML Service Down:", mlError.message);
+            // Fallback: If AI dies, return raw list but mark 'friction' as 1.0 (Safe) so app doesn't crash
+            const fallback = candidates.rows.map(c => ({
+                ...c,
+                is_saved: savedIds.has(c.id),
+                friction_index: 1.0, // Default safe
+                safety_factors: [{ icon: "⚠️", label: "Offline Mode" }]
+            }));
+            res.json(fallback);
         }
 
     } catch (err) {
@@ -42,17 +62,47 @@ router.get('/discover', auth, async (req, res) => {
     }
 });
 
-// GET ROUTE DETAILS (Google Maps Proxy to hide API Key)
-router.get('/route', auth, async (req, res) => {
-    const { originLat, originLon, destLat, destLon } = req.query;
+// 2. SAVE
+router.post('/save', auth, async (req, res) => {
+    const { poi_id } = req.body;
     try {
-        // Calls Google Directions API
-        const googleRes = await axios.get(
-            `https://maps.googleapis.com/maps/api/directions/json?origin=${originLat},${originLon}&destination=${destLat},${destLon}&key=${process.env.GOOGLE_MAPS_API_KEY}`
+        await pool.query(
+            'INSERT INTO itineraries (user_id, poi_id, visit_date) VALUES ($1, $2, NOW()) ON CONFLICT (user_id, poi_id) DO NOTHING',
+            [req.user.id, poi_id]
         );
-        res.json(googleRes.data);
+        res.json({ message: "Saved" });
     } catch (err) {
-        res.status(500).json({ error: "Navigation Service Unavailable" });
+        res.status(500).json({ error: "Save failed" });
+    }
+});
+
+// 3. UNSAVE
+router.post('/unsave', auth, async (req, res) => {
+    const { poi_id } = req.body;
+    try {
+        await pool.query(
+            'DELETE FROM itineraries WHERE user_id = $1 AND poi_id = $2',
+            [req.user.id, poi_id]
+        );
+        res.json({ message: "Unsaved" });
+    } catch (err) {
+        res.status(500).json({ error: "Unsave failed" });
+    }
+});
+
+// 4. GET SAVED
+router.get('/saved', auth, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT DISTINCT p.id, p.name, p.region, p.category 
+            FROM itineraries i 
+            JOIN pois p ON i.poi_id = p.id 
+            WHERE i.user_id = $1 
+            ORDER BY p.id ASC
+        `, [req.user.id]);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: "Error fetching saved" });
     }
 });
 

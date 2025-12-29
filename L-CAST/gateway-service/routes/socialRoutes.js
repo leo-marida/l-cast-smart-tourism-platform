@@ -11,16 +11,18 @@ const pool = new Pool({
 });
 
 // GET FEED
+// GET FEED (Now checks if YOU liked it)
 router.get('/feed', auth, async (req, res) => {
     try {
         const query = `
-            SELECT p.id, p.content, p.created_at, p.likes_count, u.username 
+            SELECT p.id, p.content, p.created_at, p.likes_count, u.username,
+            EXISTS(SELECT 1 FROM post_likes pl WHERE pl.post_id = p.id AND pl.user_id = $1) as is_liked
             FROM posts p 
             JOIN users u ON p.user_id = u.id 
             ORDER BY p.created_at DESC 
             LIMIT 50
         `;
-        const result = await pool.query(query);
+        const result = await pool.query(query, [req.user.id]);
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: err.message });

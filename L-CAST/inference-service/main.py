@@ -2,66 +2,61 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from recommender import LCastRecommender
+import logging
 
-# Initialize the API
+# Setup Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="L-CAST Inference Engine")
 
-# Initialize the Brain (Loads BERT Model & Connects to Redis/APIs)
-# We do this globally so the model loads only once on startup, not every request.
-recommender_engine = LCastRecommender()
+# Initialize Brain
+try:
+    recommender_engine = LCastRecommender()
+    logger.info("AI Model Loaded Successfully")
+except Exception as e:
+    logger.error(f"Failed to load AI Model: {e}")
 
 # --- INPUT MODELS ---
-# Updated to include Lat/Lon so the Friction Engine can check local weather
 class POICandidate(BaseModel):
     id: int
     name: str
-    description: str
-    region: str
+    description: Optional[str] = "No description"
+    region: Optional[str] = "Lebanon"
     lat: float  
     lon: float
-    base_popularity: float = 0.5 # Default if missing
+    base_popularity_score: float = 0.5
+    
+    # ✅ CRITICAL FIX: This tells Python to ignore 'distance_meters' and 'image_url'
+    # instead of crashing.
+    class Config:
+        extra = "ignore" 
 
 class ReRankRequest(BaseModel):
     user_id: Optional[int] = None
-    user_interest_profile: str  # e.g., "I love hiking and ancient ruins"
+    user_interest_profile: str = "General"
     candidates: List[POICandidate]
-
-# --- API ENDPOINTS ---
 
 @app.get("/")
 def health_check():
-    return {"status": "online", "service": "L-CAST Brain"}
+    return {"status": "online"}
 
 @app.post("/v1/recommend")
 def recommend(payload: ReRankRequest):
-    """
-    Receives a list of candidates from the Gateway.
-    Returns the list re-ranked by Safety (Friction) and Interest (Cosine Sim).
-    """
     if not payload.candidates:
         return []
 
     try:
-        # 1. Convert Pydantic models to a list of dictionaries
-        # This makes it compatible with our 'LCastRecommender' class
+        # Convert Pydantic models to clean dictionaries
         poi_data = [poi.dict() for poi in payload.candidates]
         
-        # 2. Delegate to the Intelligent Engine
-        # The engine handles:
-        #   - Vectorizing the user text (BERT)
-        #   - Fetching Real-time Weather/News (FrictionEngine)
-        #   - Computing the Weighted Harmonic Mean
-        #   - Generating the 'Why am I seeing this?' explanation
         ranked_results = recommender_engine.recommend(
             user_preferences_string=payload.user_interest_profile,
             poi_list=poi_data
         )
-        
         return ranked_results
 
     except Exception as e:
-        print(f"CRITICAL ML ERROR: {str(e)}")
-        # Graceful Degradation:
-        # If the ML crashes, return a 500 so the Gateway knows to fall back 
-        # to basic raw data (as defined in your Gateway's circuit breaker).
+        logger.error(f"ML ERROR: {str(e)}")
+        # Return 500 so Node.js knows to use fallback
         raise HTTPException(status_code=500, detail=str(e))
