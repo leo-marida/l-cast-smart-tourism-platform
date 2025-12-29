@@ -18,5 +18,9 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web"
+  },
+  "devDependencies": {
+    "babel-plugin-dotenv": "^0.1.1",
+    "react-native-dotenv": "^3.4.11"
   }
 }

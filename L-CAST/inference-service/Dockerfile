@@ -1,28 +1,21 @@
-FROM python:3.10-slim
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    gcc \
-    g++ \
-    curl \
-    libffi-dev \
-    libssl-dev \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+FROM python:3.9-slim
 
 WORKDIR /app
 
-# FIX 1: Add timeout to the initial setup
-RUN pip install --default-timeout=1000 --upgrade pip wheel setuptools
+# 1. Install minimal system tools
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 
-# FIX 2: Add timeout to the massive PyTorch download (CPU version)
-RUN pip install --default-timeout=1000 --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+# 2. INCREASED TIMEOUT: Added --default-timeout=1000 to prevent network crashes
+# We still use the CPU version to keep it small (200MB vs 2GB)
+RUN pip install --no-cache-dir --default-timeout=1000 torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
-# FIX 3: Add timeout to the rest of the requirements
-RUN pip install --default-timeout=1000 --no-cache-dir -r requirements.txt
+# 3. Install the rest
+RUN pip install --no-cache-dir --default-timeout=1000 -r requirements.txt
 
 COPY . .
 

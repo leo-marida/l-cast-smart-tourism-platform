@@ -1,27 +1,54 @@
 import numpy as np
+import os
+import shutil
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 from friction_engine import FrictionEngine
 
-# Load a production-grade pre-trained model
-model = SentenceTransformer('all-MiniLM-L6-v2')
+# --- SELF-HEALING MODEL LOADER ---
+def load_robust_model(model_name='all-MiniLM-L6-v2'):
+    """
+    Attempts to load the AI model. 
+    If a 'Consistency check failed' error occurs (corrupted download),
+    it deletes the cache and forces a fresh download.
+    """
+    try:
+        print(f"Loading AI Model: {model_name}...")
+        return SentenceTransformer(model_name)
+    except Exception as e:
+        print(f"CRITICAL LOAD ERROR: {e}")
+        print("Detected corrupted model cache. Initiating self-repair...")
+        
+        # Location where Hugging Face stores files
+        cache_dir = os.path.expanduser('~/.cache/huggingface')
+        if os.path.exists(cache_dir):
+            print(f"Deleting corrupted cache at: {cache_dir}")
+            shutil.rmtree(cache_dir) # Wipe the bad files
+        
+        print("Retrying download...")
+        return SentenceTransformer(model_name)
+
+# Initialize components
+model = load_robust_model()
 friction_engine = FrictionEngine()
 
 class LCastRecommender:
     def recommend(self, user_preferences_string, poi_list):
         """
-        poi_list: List of dicts from PostgreSQL {id, name, description, lat, lon, region}
+        poi_list: List of dicts {id, name, description, lat, lon, region}
         """
-        # 1. Convert user text (e.g., "I love hiking and quiet nature") to vector
+        # 1. Convert user text to vector
         user_vector = model.encode([user_preferences_string])
         
         results = []
         for poi in poi_list:
-            # 2. Content-Based Score (CS Rigor)
-            poi_vector = model.encode([poi['description']])
+            # 2. Content-Based Score
+            poi_desc = poi.get('description') or poi.get('name') # Fallback if desc is empty
+            poi_vector = model.encode([poi_desc])
+            
             sim_score = cosine_similarity(user_vector, [poi_vector])[0][0]
             
-            # 3. Real-time Friction Context (The "Wow" Innovation)
+            # 3. Real-time Friction
             mu, reasons = friction_engine.calculate_final_mu(poi['lat'], poi['lon'], poi['region'])
             
             final_score = sim_score * mu
@@ -38,25 +65,7 @@ class LCastRecommender:
         return sorted(results, key=lambda x: x['final_score'], reverse=True)[:10]
 
     def generate_xai(self, sim, mu, reasons):
-        """Explainable AI: Tells the user WHY they see this"""
         base = f"This matches {int(sim*100)}% of your profile."
         if mu < 1.0:
             return base + f" Warning: Visibility reduced due to {', '.join(reasons)}."
-        return base + " Area is currently stable and accessible."
-    
-    def hybrid_score(self, user_prefs, poi, user_id):
-        # Branch A: Content-Based (Already coded)
-        content_score = self.calculate_cosine_sim(user_prefs, poi['description'])
-        
-        # Branch B: Collaborative Filtering (Matrix Factorization Logic)
-        # In a full app, you'd use a library like 'Surprise'. 
-        # Here we simulate the score based on similar user check-ins.
-        collab_score = poi.get('base_popularity_score', 0.5) 
-        
-        # Combine (Weighted Harmonic Mean as per report)
-        if content_score + collab_score == 0: return 0
-        hybrid = (2 * content_score * collab_score) / (content_score + collab_score)
-        
-        # Apply Friction
-        mu, reasons = friction_engine.calculate_final_mu(poi['lat'], poi['lon'], poi['region'])
-        return hybrid * mu, mu, reasons
+        return base + " Area is currently stable."
