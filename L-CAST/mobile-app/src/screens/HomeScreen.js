@@ -37,17 +37,19 @@ export default function HomeScreen({ navigation }) {
   const fetchDiscovery = async (lat, lon) => {
     try {
       const res = await api.get(`/api/pois/discover?lat=${lat}&lon=${lon}&radius=50000`);
-      const data = Array.isArray(res.data) ? res.data : (res.data.data || []);
+      let data = Array.isArray(res.data) ? res.data : (res.data.data || []);
       
+      // SORTING FIX: Highest Safety (1.0) at the top
+      data.sort((a, b) => (b.friction_index || 0) - (a.friction_index || 0));
+
       setRecommendations(data);
 
-      // ✅ FIX: Respect the existing search query when data reloads
+      // Apply search filter if user has typed something
       if (searchQuery && searchQuery.length > 0) {
         applyFilter(data, searchQuery);
       } else {
         setFilteredData(data); 
       }
-
     } catch (err) {
       console.error("Fetch failed", err);
     } finally {
