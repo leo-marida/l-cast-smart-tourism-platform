@@ -20,15 +20,20 @@ services:
     build: ./inference-service
     env_file: .env
     restart: always
-    environment:                 
+    # 1. LIVE LINK: This mirrors your code into the container
+    volumes:
+      - ./inference-service:/app
+    # 2. DNS FIX: Allows Docker to reach OpenWeather
+    dns:                  
+      - 8.8.8.8
+      - 8.8.4.4
+    environment:
       - PYTHONUNBUFFERED=1
-    ports:                 
+      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
+    ports:
       - "8000:8000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    
 
   # PostGIS for Geospatial Queries (High CS Rigor)
   database:

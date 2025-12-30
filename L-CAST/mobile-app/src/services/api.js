@@ -6,6 +6,7 @@ const BASE_URL = 'http://192.168.0.104:3000';
 
 const api = axios.create({
   baseURL: BASE_URL,
+  timeout: 5000,
 });
 
 // Automatically attach JWT token to every request

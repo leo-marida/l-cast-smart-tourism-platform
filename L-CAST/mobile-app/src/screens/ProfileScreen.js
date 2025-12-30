@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, RefreshControl, ScrollView, Alert } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, RefreshControl, ScrollView, Alert, Modal, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
@@ -11,10 +11,15 @@ export default function ProfileScreen({ navigation }) {
   const [myPosts, setMyPosts] = useState([]);
   const [savedPlaces, setSavedPlaces] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // New State for Menu
+  const [showMenu, setShowMenu] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       loadProfile();
+      // Close menu when screen gains focus
+      setShowMenu(false);
     }, [])
   );
 
@@ -24,12 +29,10 @@ export default function ProfileScreen({ navigation }) {
       const storedName = await AsyncStorage.getItem('username');
       if (storedName) setUsername(storedName);
 
-      // 1. Get My Posts
       const feedRes = await api.get('/api/social/feed');
       const filteredPosts = feedRes.data.filter(p => p.username === storedName);
       setMyPosts(filteredPosts);
 
-      // 2. Get Saved Places
       const savedRes = await api.get('/api/pois/saved');
       setSavedPlaces(savedRes.data);
 
@@ -43,25 +46,65 @@ export default function ProfileScreen({ navigation }) {
   const handleUnsave = async (poiId) => {
     try {
         await api.post('/api/pois/unsave', { poi_id: poiId });
-        // Remove from list immediately
         setSavedPlaces(prev => prev.filter(p => p.id !== poiId));
     } catch (err) {
         Alert.alert("Error", "Could not remove.");
     }
   };
 
-  const handleLogout = async () => {
+  const confirmLogout = () => {
+    setShowMenu(false); // Close menu first
+    Alert.alert(
+      "Log Out",
+      "Are you sure you want to log out?",
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Log Out", 
+          style: "destructive", 
+          onPress: performLogout 
+        }
+      ]
+    );
+  };
+
+  const performLogout = async () => {
     await AsyncStorage.clear();
     navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
   };
 
   return (
     <SafeAreaView style={styles.container}>
+      
+      {/* --- TOP HEADER WITH 3 DOTS --- */}
+      <View style={styles.headerContainer}>
+        <View style={{flex:1}} /> 
+        <TouchableOpacity onPress={() => setShowMenu(!showMenu)} style={{padding: 5}}>
+            <Ionicons name="ellipsis-vertical" size={24} color="#333" />
+        </TouchableOpacity>
+      </View>
+
+      {/* --- MENU POPUP (Absolute Positioned) --- */}
+      {showMenu && (
+        <TouchableOpacity 
+            style={styles.menuOverlay} 
+            activeOpacity={1} 
+            onPress={() => setShowMenu(false)}
+        >
+            <View style={styles.menuBox}>
+                <TouchableOpacity onPress={confirmLogout} style={styles.menuItem}>
+                    <Ionicons name="log-out-outline" size={20} color="#e74c3c" />
+                    <Text style={styles.menuText}>Log Out</Text>
+                </TouchableOpacity>
+            </View>
+        </TouchableOpacity>
+      )}
+
       <ScrollView 
-        contentContainerStyle={{ alignItems: 'center', paddingTop: 20, paddingBottom: 40 }}
+        contentContainerStyle={{ alignItems: 'center', paddingBottom: 40 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadProfile} />}
       >
-        {/* HEADER */}
+        {/* AVATAR */}
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>{username ? username[0].toUpperCase() : 'U'}</Text>
         </View>
@@ -105,11 +148,6 @@ export default function ProfileScreen({ navigation }) {
                 ))
             )}
         </View>
-
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-          <Text style={styles.logoutText}>Log Out</Text>
-        </TouchableOpacity>
-        
       </ScrollView>
     </SafeAreaView>
   );
@@ -117,6 +155,26 @@ export default function ProfileScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
+  
+  // Header & Menu Styles
+  headerContainer: { flexDirection: 'row', paddingHorizontal: 15, paddingVertical: 10, zIndex: 10 },
+  menuOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, zIndex: 20 },
+  menuBox: { 
+    position: 'absolute', 
+    top: 50, 
+    right: 20, 
+    backgroundColor: 'white', 
+    borderRadius: 8, 
+    padding: 5, 
+    elevation: 5, 
+    shadowColor: '#000', 
+    shadowOpacity: 0.1, 
+    shadowRadius: 5,
+    minWidth: 150
+  },
+  menuItem: { flexDirection: 'row', alignItems: 'center', padding: 12 },
+  menuText: { marginLeft: 10, fontSize: 16, color: '#e74c3c', fontWeight: '500' },
+
   avatar: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
   avatarText: { color: 'white', fontSize: 32, fontWeight: 'bold' },
   name: { fontSize: 22, fontWeight: 'bold', marginBottom: 30 },
@@ -125,16 +183,11 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 15, color:'#333' },
   emptyText: { color: 'gray', fontStyle: 'italic' },
 
-  // Posts Styles
   postCard: { backgroundColor: '#f0f2f5', padding: 15, borderRadius: 10, marginBottom: 10 },
   postContent: { fontSize: 15, color: '#333' },
   postDate: { fontSize: 11, color: 'gray', marginTop: 5, textAlign: 'right' },
 
-  // Saved Styles
   savedCard: { flexDirection: 'row', alignItems: 'center', justifyContent:'space-between', backgroundColor: '#f9f9f9', padding: 15, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: '#eee' },
   savedName: { fontWeight: 'bold', fontSize: 16 },
   savedRegion: { color: 'gray', fontSize: 12 },
-
-  logoutBtn: { backgroundColor: '#ffebee', paddingVertical: 12, paddingHorizontal: 30, borderRadius: 25 },
-  logoutText: { color: '#d32f2f', fontWeight: 'bold', fontSize: 16 }
 });
