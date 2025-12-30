@@ -9,7 +9,7 @@ const { Pool } = require('pg');
 const app = express();
 app.use(helmet());
 app.use(express.json());
-
+app.use('/api/pois', poiRoutes);
 const cors = require('cors');
 app.use(cors()); // Place this at the top of your app.js
 

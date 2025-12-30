@@ -11,9 +11,15 @@ const pool = new Pool({
   database: process.env.POSTGRES_DB
 });
 
+// Helper to determine AI Service URL
+const getAIUrl = () => {
+    // If running in Docker, use container name. If local, use localhost.
+    return process.env.AI_SERVICE_URL || 'http://inference-service:8000';
+};
+
 // 1. DISCOVER (The Master Fix)
 router.get('/discover', auth, async (req, res) => {
-    const { lat, lon, radius = 100000 } = req.query;
+    const { lat, lon, radius = 50000 } = req.query;
 
     try {
         // A. Fetch Candidates from Database
@@ -30,11 +36,11 @@ router.get('/discover', auth, async (req, res) => {
 
         // C. Call Python Brain (Calculates Friction & Explanations)
         try {
-            const mlResponse = await axios.post('http://inference-service:8000/v1/recommend', {
+            const mlResponse = await axios.post(`${getAIUrl()}/v1/recommend`, {
                 user_id: req.user.id,
                 user_interest_profile: "General", 
                 candidates: candidates.rows // Send raw data to AI
-            });
+            }, { timeout: 3000 }); // 3s timeout so app doesn't hang
 
             // D. Merge "Saved Status" into AI Results
             // The AI returns enriched data (friction_index, factors), we just need to add 'is_saved' back
@@ -46,18 +52,19 @@ router.get('/discover', auth, async (req, res) => {
             res.json(finalResults);
 
         } catch (mlError) {
-            console.error("ML Service Down:", mlError.message);
+            console.error("⚠️ AI Service Error:", mlError.message); 
             // Fallback: If AI dies, return raw list but mark 'friction' as 1.0 (Safe) so app doesn't crash
             const fallback = candidates.rows.map(c => ({
                 ...c,
                 is_saved: savedIds.has(c.id),
                 friction_index: 1.0, // Default safe
-                safety_factors: [{ icon: "⚠️", label: "Offline Mode" }]
+                safety_factors: [{ icon: "⚠️", label: "Live Safety Offline" }]
             }));
             res.json(fallback);
         }
 
     } catch (err) {
+        console.error("CRITICAL DISCOVER ERROR:", err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -65,6 +72,12 @@ router.get('/discover', auth, async (req, res) => {
 // 2. SAVE
 router.post('/save', auth, async (req, res) => {
     const { poi_id } = req.body;
+    // Check if body was parsed
+    if (!poi_id) {
+        console.error("Save Error: Missing poi_id. Check express.json() middleware.");
+        return res.status(400).json({ error: "Missing POI ID" });
+    }
+
     try {
         await pool.query(
             'INSERT INTO itineraries (user_id, poi_id, visit_date) VALUES ($1, $2, NOW()) ON CONFLICT (user_id, poi_id) DO NOTHING',
@@ -72,7 +85,12 @@ router.post('/save', auth, async (req, res) => {
         );
         res.json({ message: "Saved" });
     } catch (err) {
-        res.status(500).json({ error: "Save failed" });
+        console.error("SAVE FAILED (SQL Error):", err.message);
+        // Specific help for the constraint error
+        if (err.message.includes('ON CONFLICT')) {
+            console.error("HINT: Run 'ALTER TABLE itineraries ADD CONSTRAINT unique_user_poi UNIQUE (user_id, poi_id);'");
+        }
+        res.status(500).json({ error: "Database error during save" });
     }
 });
 
@@ -86,6 +104,7 @@ router.post('/unsave', auth, async (req, res) => {
         );
         res.json({ message: "Unsaved" });
     } catch (err) {
+        console.error("UNSAVE ERROR:", err);
         res.status(500).json({ error: "Unsave failed" });
     }
 });
@@ -102,6 +121,7 @@ router.get('/saved', auth, async (req, res) => {
         `, [req.user.id]);
         res.json(result.rows);
     } catch (err) {
+        console.error("GET SAVED ERROR:", err);
         res.status(500).json({ error: "Error fetching saved" });
     }
 });

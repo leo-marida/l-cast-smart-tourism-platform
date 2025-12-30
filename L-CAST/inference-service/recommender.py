@@ -33,23 +33,27 @@ model = load_robust_model()
 friction_engine = FrictionEngine()
 
 class LCastRecommender:
-    # ... inside LCastRecommender class ...
-
     def recommend(self, user_preferences_string, poi_list):
+        # Encode user profile once (Result is a 2D array: [1, 384])
         user_vector = model.encode([user_preferences_string])
         results = []
         
         for poi in poi_list:
             # 1. Similarity
             poi_desc = poi.get('description') or poi.get('name')
+            
+            # Encode POI (Result is a 2D array: [1, 384])
             poi_vector = model.encode([poi_desc])
-            sim_score = cosine_similarity(user_vector, [poi_vector])[0][0]
+            
+            # ✅ FIX: Removed extra brackets around poi_vector.
+            # user_vector is (1, 384) and poi_vector is (1, 384).
+            # cosine_similarity expects two 2D arrays.
+            sim_score = cosine_similarity(user_vector, poi_vector)[0][0]
             
             # 2. Friction (Now returns detailed factors)
             mu, factors = friction_engine.calculate_final_mu(poi['lat'], poi['lon'], poi['region'])
             
             # 3. Hybrid Score
-            # We want to show LOW score items too, so we don't filter them out here.
             final_score = sim_score * mu
             
             results.append({
@@ -59,7 +63,7 @@ class LCastRecommender:
                 "final_score": float(final_score),
                 "match_rate": float(sim_score),
                 "friction_index": float(mu),
-                "safety_factors": factors, # <--- Sending the Breakdown!
+                "safety_factors": factors, 
                 "xai_explanation": self.generate_xai(sim_score, mu)
             })
             
@@ -67,9 +71,5 @@ class LCastRecommender:
         return sorted(results, key=lambda x: x['final_score'], reverse=True)
 
     def generate_xai(self, sim, mu):
-        # Simplified XAI string since we have badges now
+        # Simple explanation string
         return f"Interest Match: {int(sim*100)}%"
-        base = f"This matches {int(sim*100)}% of your profile."
-        if mu < 1.0:
-            return base + f" Warning: Visibility reduced due to {', '.join(reasons)}."
-        return base + " Area is currently stable."
