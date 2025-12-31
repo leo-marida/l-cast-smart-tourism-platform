@@ -32,3 +32,14 @@ INSERT INTO pois (name, region, description, base_popularity_score, location) VA
 ('Qadisha Valley', 'Bcharre', 'The Holy Valley, deep gorge with ancient monasteries.', 0.91, ST_SetSRID(ST_MakePoint(35.9900, 34.2500), 4326)),
 ('Mzaar Kfardebian', 'Kfardebian', 'Largest ski resort in the Middle East.', 0.94, ST_SetSRID(ST_MakePoint(35.8333, 33.9915), 4326)),
 ('Tripoli Citadel', 'Tripoli', 'Raymond de Saint-Gilles Citadel overlooking the city.', 0.85, ST_SetSRID(ST_MakePoint(35.8436, 34.4333), 4326));
+
+-- EXTRA UNIQUE GEMS (Nature, Heritage & Religious)
+INSERT INTO pois (name, region, description, base_popularity_score, location) VALUES 
+('Baatara Gorge Waterfall', 'Tannourine', 'Stunning waterfall dropping 255m through three natural bridges.', 0.97, ST_SetSRID(ST_MakePoint(35.8704, 34.1734), 4326)),
+('Saint Charbel Shrine', 'Annaya', 'Monastery of St. Maron, a major pilgrimage site.', 0.96, ST_SetSRID(ST_MakePoint(35.6953, 34.1166), 4326)),
+('Moussa Castle', 'Chouf', 'A castle built by a single man over 60 years, featuring wax figures.', 0.88, ST_SetSRID(ST_MakePoint(35.5819, 33.6983), 4326)),
+('Mseilha Fort', 'Batroun', 'Historic fortification built on a rocky limestone rock.', 0.86, ST_SetSRID(ST_MakePoint(35.6736, 34.2736), 4326)),
+('Horsh Ehden Nature Reserve', 'Ehden', 'A nature reserve on the slopes of Mount Lebanon with unique biodiversity.', 0.91, ST_SetSRID(ST_MakePoint(35.9910, 34.3120), 4326)),
+('Rashaya Citadel', 'Rashaya', 'The Citadel of Independence where leaders were imprisoned in 1943.', 0.87, ST_SetSRID(ST_MakePoint(35.8445, 33.5015), 4326)),
+('Lake Qaraoun', 'Bekaa', 'The largest artificial lake in Lebanon, offering stunning views.', 0.84, ST_SetSRID(ST_MakePoint(35.6919, 33.5686), 4326)),
+('Douma Village', 'Batroun', 'Traditional village known for its red-tiled roof houses.', 0.85, ST_SetSRID(ST_MakePoint(35.8423, 34.2033), 4326));
