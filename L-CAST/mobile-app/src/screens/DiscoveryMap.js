@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Text, TouchableOpacity, Linking, Alert } from 'react-native';
+import { View, StyleSheet, Text, TouchableOpacity, Linking, Image, ScrollView, Dimensions } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,6 +7,8 @@ import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
 // Try to import, but handle if missing
 import { GOOGLE_MAPS_API_KEY } from '@env'; 
+
+const { width } = Dimensions.get('window');
 
 export default function DiscoveryMap({ route, navigation }) {
   const [userLocation, setUserLocation] = useState(null);
@@ -19,18 +21,15 @@ export default function DiscoveryMap({ route, navigation }) {
   const getLatLon = (item) => {
     if (!item) return { lat: 33.8938, lon: 35.5018 }; // Default Beirut
     
-    // Check flattened format (from Backend)
     if (item.lat && item.lon) return { lat: parseFloat(item.lat), lon: parseFloat(item.lon) };
     
-    // Check nested Geometry format (GeoJSON standard)
     if (item.location?.coordinates) {
         return { lat: item.location.coordinates[1], lon: item.location.coordinates[0] };
     }
 
-    // Check Google Maps format
     if (item.latitude && item.longitude) return { lat: item.latitude, lon: item.longitude };
 
-    return { lat: 33.8938, lon: 35.5018 }; // Fallback
+    return { lat: 33.8938, lon: 35.5018 }; 
   };
 
   // 1. Initial Setup: Get Location & Fetch POIs
@@ -42,7 +41,6 @@ export default function DiscoveryMap({ route, navigation }) {
       let loc = await Location.getCurrentPositionAsync({});
       setUserLocation(loc.coords);
       
-      // Load POIs around user
       fetchPois(loc.coords.latitude, loc.coords.longitude);
     })();
   }, []);
@@ -51,32 +49,29 @@ export default function DiscoveryMap({ route, navigation }) {
   useEffect(() => {
     if (route.params?.targetPoi) {
       const target = route.params.targetPoi;
-      // Wait a bit for map to load, then select
       setTimeout(() => onMarkerPress(target), 500);
     }
   }, [route.params]);
 
   const fetchPois = async (lat, lon) => {
     try {
-      // Fetch similar to Home Screen
       const res = await api.get(`/api/pois/discover?lat=${lat}&lon=${lon}`);
       let data = Array.isArray(res.data) ? res.data : (res.data.data || []);
       
-      // Sort by Safety (Safest First) just like Home
+      // Sort by Safety (Safest First)
       data.sort((a, b) => (b.friction_index || 0) - (a.friction_index || 0));
       
       setPois(data);
     } catch (err) {
-      console.log("Map Fetch Error (Check API URL):", err);
+      console.log("Map Fetch Error:", err);
     }
   };
 
   const getRoutePreview = async (destination) => {
     if (!userLocation || !destination) return;
     
-    // If no API Key, skip route drawing to prevent "Network Error"
     if (!GOOGLE_MAPS_API_KEY) {
-        console.log("Skipping Route: No Google Maps API Key found in .env");
+        console.log("Skipping Route: No Google Maps API Key found");
         return;
     }
 
@@ -86,22 +81,15 @@ export default function DiscoveryMap({ route, navigation }) {
 
     try {
       const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${dest}&key=${GOOGLE_MAPS_API_KEY}`;
-      
-      // Use standard fetch here (External API, not our Backend)
       const resp = await fetch(url);
       const data = await resp.json();
       
       if (data.routes && data.routes.length > 0) {
-        // Simple straight line fallback if decoding is too complex without library
-        // Or if you have a decoder, use it. Ideally we just draw Start -> End for MVP.
         setRouteCoords([
             { latitude: userLocation.latitude, longitude: userLocation.longitude },
             { latitude: destLat, longitude: destLon }
         ]);
         setTravelTime(data.routes[0].legs[0].duration.text);
-      } else {
-         // Gracefully handle if Google refuses key
-         console.log("Google Maps Route Error:", data.error_message || "No routes");
       }
     } catch (error) {
       console.log("Direction Network Error", error);
@@ -118,12 +106,8 @@ export default function DiscoveryMap({ route, navigation }) {
   const handleNavigate = () => {
     if (!userLocation || !selectedPoi) return;
     const { lat: destLat, lon: destLon } = getLatLon(selectedPoi);
-    
-    // Open Google Maps App externally
     const url = `https://www.google.com/maps/dir/?api=1&origin=${userLocation.latitude},${userLocation.longitude}&destination=${destLat},${destLon}&travelmode=driving`;
     Linking.openURL(url);
-
-    // Reset UI
     setSelectedPoi(null);
   };
 
@@ -132,15 +116,27 @@ export default function DiscoveryMap({ route, navigation }) {
     setRouteCoords([]);
   };
 
-  // Determine Map Region
   const { lat: regionLat, lon: regionLon } = selectedPoi 
      ? getLatLon(selectedPoi) 
      : (userLocation ? { lat: userLocation.latitude, lon: userLocation.longitude } : { lat: 33.8938, lon: 35.5018 });
 
+  // --- GENERATE GALLERY IMAGES (Demo Logic) ---
+  const getGalleryImages = (poi) => {
+    const images = [];
+    // 1. Real Image from DB
+    if (poi.image_url) images.push(poi.image_url);
+    
+    // 2. Fallback / Additional Demo Images (Nature/Landmark style)
+    // We use a random ID seed to ensure different images for different places
+    images.push(`https://loremflickr.com/400/300/lebanon,nature?random=${poi.id}`);
+    images.push(`https://loremflickr.com/400/300/archaeology,ruins?random=${poi.id + 100}`);
+    
+    return images;
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       
-      {/* Back Button */}
       <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
         <Ionicons name="arrow-back" size={24} color="#333" />
       </TouchableOpacity>
@@ -148,7 +144,6 @@ export default function DiscoveryMap({ route, navigation }) {
       <MapView 
         style={styles.map} 
         showsUserLocation={true}
-        // Use key to force refresh if needed
         region={{
           latitude: regionLat,
           longitude: regionLon,
@@ -158,14 +153,11 @@ export default function DiscoveryMap({ route, navigation }) {
       >
         {pois.map((poi, index) => {
            const { lat, lon } = getLatLon(poi);
-           
-           // Color Logic
            const isSelected = selectedPoi && selectedPoi.id === poi.id;
            let pinColor = 'green';
            if (poi.friction_index < 0.8) pinColor = 'orange';
            if (poi.friction_index < 0.5) pinColor = 'red';
-           
-           if (isSelected) pinColor = 'blue'; // Selected is Blue
+           if (isSelected) pinColor = 'blue';
 
            return (
             <Marker
@@ -177,40 +169,59 @@ export default function DiscoveryMap({ route, navigation }) {
             />
            )
         })}
-        
-        {/* Draw Route Line if exists */}
-        {routeCoords.length > 0 && (
-            <Polyline coordinates={routeCoords} strokeWidth={4} strokeColor="#4285F4" />
-        )}
+        {routeCoords.length > 0 && <Polyline coordinates={routeCoords} strokeWidth={4} strokeColor="#4285F4" />}
       </MapView>
 
-      {/* BOTTOM POPUP CARD */}
+      {/* --- SELECTED CARD WITH GALLERY --- */}
       {selectedPoi && (
         <View style={styles.card}>
-          <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>{selectedPoi.name}</Text>
-              <TouchableOpacity onPress={handleClose}>
-                 <Ionicons name="close-circle" size={24} color="#999" />
-              </TouchableOpacity>
-          </View>
           
-          <Text style={styles.regionText}>{selectedPoi.region}</Text>
-          
-          {/* Safety Badge in Card */}
-          <View style={[styles.badge, { backgroundColor: selectedPoi.friction_index < 0.8 ? '#f39c12' : '#27ae60' }]}>
-               <Text style={styles.badgeText}>Safety: {Math.round((selectedPoi.friction_index || 1) * 100)}%</Text>
+          {/* 1. HORIZONTAL IMAGE GALLERY */}
+          <View style={styles.galleryContainer}>
+             <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
+                 {getGalleryImages(selectedPoi).map((imgUrl, i) => (
+                     <Image 
+                        key={i}
+                        source={{ uri: imgUrl }} 
+                        style={styles.galleryImage}
+                        resizeMode="cover"
+                     />
+                 ))}
+             </ScrollView>
+             {/* Small indicator overlay */}
+             <View style={styles.galleryBadge}>
+                 <Ionicons name="images" size={12} color="white" />
+                 <Text style={styles.galleryBadgeText}> Gallery</Text>
+             </View>
           </View>
 
-          {travelTime && <Text style={styles.timeText}>⏱️ Approx {travelTime} drive</Text>}
-          
-          <Text style={styles.desc} numberOfLines={3}>
-             {selectedPoi.description || "No description available."}
-          </Text>
-          
-          <TouchableOpacity style={styles.navBtn} onPress={handleNavigate}>
-            <Ionicons name="map" size={20} color="white" style={{marginRight: 8}} />
-            <Text style={styles.navText}>Open in Google Maps</Text>
-          </TouchableOpacity>
+          {/* 2. TEXT CONTENT (With Padding) */}
+          <View style={styles.cardContent}>
+              <View style={styles.cardHeader}>
+                  <Text style={styles.cardTitle}>{selectedPoi.name}</Text>
+                  <TouchableOpacity onPress={handleClose}>
+                     <Ionicons name="close-circle" size={26} color="#999" />
+                  </TouchableOpacity>
+              </View>
+              
+              <Text style={styles.regionText}>{selectedPoi.region}</Text>
+              
+              {/* Safety Badge */}
+              <View style={[styles.badge, { backgroundColor: selectedPoi.friction_index < 0.8 ? '#f39c12' : '#27ae60' }]}>
+                   <Text style={styles.badgeText}>Safety: {Math.round((selectedPoi.friction_index || 1) * 100)}%</Text>
+              </View>
+
+              {travelTime && <Text style={styles.timeText}>⏱️ Approx {travelTime} drive</Text>}
+              
+              <Text style={styles.desc} numberOfLines={3}>
+                 {selectedPoi.description || "No description available."}
+              </Text>
+              
+              <TouchableOpacity style={styles.navBtn} onPress={handleNavigate}>
+                <Ionicons name="map" size={20} color="white" style={{marginRight: 8}} />
+                <Text style={styles.navText}>Open in Google Maps</Text>
+              </TouchableOpacity>
+          </View>
         </View>
       )}
     </SafeAreaView>
@@ -226,11 +237,26 @@ const styles = StyleSheet.create({
       backgroundColor: 'white', padding: 10, borderRadius: 20, elevation: 5
   },
 
+  // Updated Card Style: No padding on parent to allow full-width image
   card: { 
       position: 'absolute', bottom: 30, left: 20, right: 20, 
-      backgroundColor: 'white', padding: 20, borderRadius: 20, 
-      elevation: 10, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10 
+      backgroundColor: 'white', borderRadius: 20, 
+      elevation: 10, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10,
+      overflow: 'hidden' // Ensures image respects rounded corners
   },
+  
+  // Gallery Styles
+  galleryContainer: { height: 150, width: '100%', backgroundColor: '#eee' },
+  galleryImage: { width: width - 40, height: 150 }, // Width matches card width (screen - margins)
+  galleryBadge: { 
+      position: 'absolute', bottom: 10, right: 10, 
+      backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12,
+      flexDirection: 'row', alignItems: 'center'
+  },
+  galleryBadgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
+
+  // Content Styles
+  cardContent: { padding: 20 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
   cardTitle: { fontSize: 20, fontWeight: 'bold', color: '#333', width: '90%' },
   regionText: { color: 'gray', marginBottom: 10 },
