@@ -2,13 +2,13 @@ import os
 import requests
 import logging
 import time
+import concurrent.futures # <--- NEW: For Parallel Speed
 
 logger = logging.getLogger(__name__)
 
 class FrictionEngine:
     def __init__(self):
         self.weather_key = os.getenv("OPENWEATHER_API_KEY")
-        # Simple memory cache: {(lat_rounded, lon_rounded): {'data': response, 'time': timestamp}}
         self.cache = {}
         self.CACHE_DURATION = 600 # 10 Minutes
 
@@ -17,43 +17,69 @@ class FrictionEngine:
         else:
             logger.error("OPENWEATHER_API_KEY missing.")
 
-    def get_weather(self, lat, lon):
-        # Round coordinates to 1 decimal place (approx 10km radius) to group requests
-        key = (round(lat, 1), round(lon, 1))
-        current_time = time.time()
+    def get_weather_key(self, lat, lon):
+        # Group by ~11km radius to reduce API calls
+        return (round(lat, 1), round(lon, 1))
 
-        # Check Cache
+    def fetch_single(self, lat, lon):
+        """Helper to fetch one location, used by the ThreadPool"""
+        key = self.get_weather_key(lat, lon)
+        
+        # Skip if valid cache exists
         if key in self.cache:
-            entry = self.cache[key]
-            if current_time - entry['time'] < self.CACHE_DURATION:
-                return entry['data']
+            if time.time() - self.cache[key]['time'] < self.CACHE_DURATION:
+                return
 
-        # Fetch New Data
         if self.weather_key:
             try:
                 url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={self.weather_key}&units=metric"
-                resp = requests.get(url, timeout=2).json() # Short timeout
-                
+                resp = requests.get(url, timeout=3).json()
                 if 'main' in resp:
-                    self.cache[key] = {'data': resp, 'time': current_time}
-                    return resp
+                    self.cache[key] = {'data': resp, 'time': time.time()}
             except Exception as e:
                 logger.error(f"Weather Fetch Fail: {e}")
-        
-        return None
+
+    def warm_up_cache(self, coord_list):
+        """
+        🚀 TURBO MODE: Fetches weather for ALL locations in parallel.
+        Instead of waiting 15s, this takes ~0.5s.
+        """
+        unique_coords = []
+        seen_keys = set()
+
+        # Only fetch what is missing from cache
+        for lat, lon in coord_list:
+            key = self.get_weather_key(lat, lon)
+            if key not in seen_keys:
+                unique_coords.append((lat, lon))
+                seen_keys.add(key)
+
+        # Fire 10 parallel requests at once
+        if unique_coords:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                executor.map(lambda p: self.fetch_single(p[0], p[1]), unique_coords)
 
     def calculate_final_mu(self, lat, lon, region_name):
         factors = []
-        mu = 1.0 # Start at 100%
+        mu = 1.0 
 
-        # 1. OPTIMIZED WEATHER FETCH
-        weather_data = self.get_weather(lat, lon)
+        # 1. READ FROM CACHE (Instant because we warmed it up)
+        key = self.get_weather_key(lat, lon)
+        weather_data = None
+        
+        if key in self.cache:
+            weather_data = self.cache[key]['data']
+        else:
+            # Fallback: Try to fetch synchronously if missed
+            self.fetch_single(lat, lon)
+            if key in self.cache:
+                weather_data = self.cache[key]['data']
 
         if weather_data:
             temp = weather_data['main']['temp']
             condition = weather_data['weather'][0]['main']
             
-            # --- UPDATED PENALTY LOGIC (Make it more sensitive) ---
+            # --- PENALTY LOGIC ---
             if 'Rain' in condition or 'Drizzle' in condition:
                 mu -= 0.25
                 factors.append({"icon": "🌧️", "label": "Rain (-25%)"})
@@ -64,7 +90,6 @@ class FrictionEngine:
                 mu -= 0.50
                 factors.append({"icon": "⛈️", "label": "Storm (-50%)"})
             elif 'Clouds' in condition:
-                # Small penalty for clouds so score isn't always 100%
                 mu -= 0.05
                 factors.append({"icon": "☁️", "label": "Cloudy (-5%)"})
             elif 'Clear' in condition:
@@ -72,27 +97,22 @@ class FrictionEngine:
             else:
                  factors.append({"icon": "🌥️", "label": condition})
 
-            # Temp Penalty (If too cold)
             if temp < 10:
                 mu -= 0.05
                 factors.append({"icon": "🌡️", "label": f"Cold {int(temp)}°C (-5%)"})
             else:
                 factors.append({"icon": "🌡️", "label": f"{int(temp)}°C"})
         else:
-            # Fallback if API fails (Don't crash, just warn)
             mu -= 0.10
             factors.append({"icon": "⚠️", "label": "Weather Offline"})
 
         # 2. SIMULATED TRAFFIC
-        # Use a deterministic seed based on location so it doesn't flicker
         traffic_seed = (int(lat * 10000) % 100) / 100.0 
-        
-        if traffic_seed > 0.8: # 20% chance of traffic
+        if traffic_seed > 0.8:
             mu -= 0.20
             factors.append({"icon": "🚗", "label": "High Traffic (-20%)"})
         else:
             factors.append({"icon": "✅", "label": "Traffic Normal"})
 
-        # 3. Final Scoring
         mu = max(0.1, min(1.0, mu))
         return round(mu, 2), factors
