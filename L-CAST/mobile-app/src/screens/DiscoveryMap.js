@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Text, TouchableOpacity, Linking, Image, ScrollView, Dimensions } from 'react-native';
+import { View, StyleSheet, Text, TouchableOpacity, Linking, Image, ScrollView, Dimensions, ActivityIndicator } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
-// Try to import, but handle if missing
+// Use your key here
 import { GOOGLE_MAPS_API_KEY } from '@env'; 
 
 const { width } = Dimensions.get('window');
@@ -16,67 +16,85 @@ export default function DiscoveryMap({ route, navigation }) {
   const [selectedPoi, setSelectedPoi] = useState(null);
   const [routeCoords, setRouteCoords] = useState([]);
   const [travelTime, setTravelTime] = useState(null);
+  const [travelDistance, setTravelDistance] = useState(null);
+  const [isMapReady, setIsMapReady] = useState(false);
 
-  // --- HELPER: Safely get Lat/Lon no matter the data structure ---
+  // --- HELPER: Aggressive Coordinate Parser ---
   const getLatLon = (item) => {
     if (!item) return { lat: 33.8938, lon: 35.5018 }; // Default Beirut
     
-    if (item.lat && item.lon) return { lat: parseFloat(item.lat), lon: parseFloat(item.lon) };
-    
+    // 1. Backend sends 'lat' and 'lon' as numbers or strings
+    if (item.lat !== undefined && item.lon !== undefined) {
+        return { lat: parseFloat(item.lat), lon: parseFloat(item.lon) };
+    }
+    // 2. PostGIS GeoJSON format
     if (item.location?.coordinates) {
         return { lat: item.location.coordinates[1], lon: item.location.coordinates[0] };
     }
-
-    if (item.latitude && item.longitude) return { lat: item.latitude, lon: item.longitude };
+    // 3. Google Maps format fallback
+    if (item.latitude && item.longitude) {
+        return { lat: parseFloat(item.latitude), lon: parseFloat(item.longitude) };
+    }
 
     return { lat: 33.8938, lon: 35.5018 }; 
   };
 
-  // 1. Initial Setup: Get Location & Fetch POIs
+  // 1. Get User Location on Mount
   useEffect(() => {
     (async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
+      try {
+        let { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') return;
 
-      let loc = await Location.getCurrentPositionAsync({});
-      setUserLocation(loc.coords);
-      
-      fetchPois(loc.coords.latitude, loc.coords.longitude);
+        let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        setUserLocation(loc.coords);
+        
+        // Fetch surrounding POIs once we have location
+        fetchPois(loc.coords.latitude, loc.coords.longitude);
+      } catch (e) {
+        console.log("Location Error:", e);
+      }
     })();
   }, []);
 
-  // 2. Handle incoming clicks from Home Screen
+  // 2. LISTEN for Params AND User Location
+  // Only trigger the route calculation when WE HAVE BOTH the target AND the user's location
   useEffect(() => {
-    if (route.params?.targetPoi) {
+    if (route.params?.targetPoi && userLocation) {
       const target = route.params.targetPoi;
-      setTimeout(() => onMarkerPress(target), 500);
+      // Trigger selection logic
+      setSelectedPoi(target);
+      getRoutePreview(target, userLocation);
     }
-  }, [route.params]);
+  }, [route.params, userLocation]); // <--- Dependency array fixes the Race Condition
 
   const fetchPois = async (lat, lon) => {
     try {
       const res = await api.get(`/api/pois/discover?lat=${lat}&lon=${lon}`);
       let data = Array.isArray(res.data) ? res.data : (res.data.data || []);
-      
-      // Sort by Safety (Safest First)
+      // Sort by Safety
       data.sort((a, b) => (b.friction_index || 0) - (a.friction_index || 0));
-      
       setPois(data);
     } catch (err) {
       console.log("Map Fetch Error:", err);
     }
   };
 
-  const getRoutePreview = async (destination) => {
-    if (!userLocation || !destination) return;
+  const getRoutePreview = async (destination, originLoc) => {
+    if (!originLoc || !destination) return;
     
+    // Reset previous route info
+    setTravelTime(null);
+    setTravelDistance(null);
+    setRouteCoords([]);
+
     if (!GOOGLE_MAPS_API_KEY) {
-        console.log("Skipping Route: No Google Maps API Key found");
+        console.warn("No Google Maps API Key");
         return;
     }
 
     const { lat: destLat, lon: destLon } = getLatLon(destination);
-    const origin = `${userLocation.latitude},${userLocation.longitude}`;
+    const origin = `${originLoc.latitude},${originLoc.longitude}`;
     const dest = `${destLat},${destLon}`;
 
     try {
@@ -85,22 +103,27 @@ export default function DiscoveryMap({ route, navigation }) {
       const data = await resp.json();
       
       if (data.routes && data.routes.length > 0) {
+        const leg = data.routes[0].legs[0];
+        setTravelTime(leg.duration.text); 
+        setTravelDistance(leg.distance.text); 
+        
+        // Draw simple line
         setRouteCoords([
-            { latitude: userLocation.latitude, longitude: userLocation.longitude },
+            { latitude: originLoc.latitude, longitude: originLoc.longitude },
             { latitude: destLat, longitude: destLon }
         ]);
-        setTravelTime(data.routes[0].legs[0].duration.text);
       }
     } catch (error) {
-      console.log("Direction Network Error", error);
+      console.log("Direction API Error", error);
     }
   };
 
   const onMarkerPress = (poi) => {
     setSelectedPoi(poi);
-    setTravelTime(null);
-    setRouteCoords([]);
-    getRoutePreview(poi);
+    // Use current userLocation state
+    if (userLocation) {
+        getRoutePreview(poi, userLocation);
+    }
   };
 
   const handleNavigate = () => {
@@ -108,7 +131,6 @@ export default function DiscoveryMap({ route, navigation }) {
     const { lat: destLat, lon: destLon } = getLatLon(selectedPoi);
     const url = `https://www.google.com/maps/dir/?api=1&origin=${userLocation.latitude},${userLocation.longitude}&destination=${destLat},${destLon}&travelmode=driving`;
     Linking.openURL(url);
-    setSelectedPoi(null);
   };
 
   const handleClose = () => {
@@ -120,17 +142,15 @@ export default function DiscoveryMap({ route, navigation }) {
      ? getLatLon(selectedPoi) 
      : (userLocation ? { lat: userLocation.latitude, lon: userLocation.longitude } : { lat: 33.8938, lon: 35.5018 });
 
-  // --- GENERATE GALLERY IMAGES (Demo Logic) ---
+  // --- IMAGE LOGIC ---
   const getGalleryImages = (poi) => {
     const images = [];
-    // 1. Real Image from DB
-    if (poi.image_url) images.push(poi.image_url);
-    
-    // 2. Fallback / Additional Demo Images (Nature/Landmark style)
-    // We use a random ID seed to ensure different images for different places
-    images.push(`https://loremflickr.com/400/300/lebanon,nature?random=${poi.id}`);
-    images.push(`https://loremflickr.com/400/300/archaeology,ruins?random=${poi.id + 100}`);
-    
+    if (poi.image_url && poi.image_url.startsWith('http')) {
+        images.push(poi.image_url);
+    } else {
+        // Fallback for visual testing if DB is empty
+        images.push('https://upload.wikimedia.org/wikipedia/commons/thumb/5/5e/Pigeon_Rocks_of_Beirut%2C_Rock_of_Raouche%2C_Beirut%2C_Lebanon.jpg/800px-Pigeon_Rocks_of_Beirut%2C_Rock_of_Raouche%2C_Beirut%2C_Lebanon.jpg');
+    }
     return images;
   };
 
@@ -144,6 +164,7 @@ export default function DiscoveryMap({ route, navigation }) {
       <MapView 
         style={styles.map} 
         showsUserLocation={true}
+        onMapReady={() => setIsMapReady(true)}
         region={{
           latitude: regionLat,
           longitude: regionLon,
@@ -151,7 +172,7 @@ export default function DiscoveryMap({ route, navigation }) {
           longitudeDelta: 0.05,
         }}
       >
-        {pois.map((poi, index) => {
+        {isMapReady && pois.map((poi, index) => {
            const { lat, lon } = getLatLon(poi);
            const isSelected = selectedPoi && selectedPoi.id === poi.id;
            let pinColor = 'green';
@@ -172,11 +193,9 @@ export default function DiscoveryMap({ route, navigation }) {
         {routeCoords.length > 0 && <Polyline coordinates={routeCoords} strokeWidth={4} strokeColor="#4285F4" />}
       </MapView>
 
-      {/* --- SELECTED CARD WITH GALLERY --- */}
+      {/* --- DETAILS CARD --- */}
       {selectedPoi && (
         <View style={styles.card}>
-          
-          {/* 1. HORIZONTAL IMAGE GALLERY */}
           <View style={styles.galleryContainer}>
              <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
                  {getGalleryImages(selectedPoi).map((imgUrl, i) => (
@@ -188,14 +207,8 @@ export default function DiscoveryMap({ route, navigation }) {
                      />
                  ))}
              </ScrollView>
-             {/* Small indicator overlay */}
-             <View style={styles.galleryBadge}>
-                 <Ionicons name="images" size={12} color="white" />
-                 <Text style={styles.galleryBadgeText}> Gallery</Text>
-             </View>
           </View>
 
-          {/* 2. TEXT CONTENT (With Padding) */}
           <View style={styles.cardContent}>
               <View style={styles.cardHeader}>
                   <Text style={styles.cardTitle}>{selectedPoi.name}</Text>
@@ -206,12 +219,25 @@ export default function DiscoveryMap({ route, navigation }) {
               
               <Text style={styles.regionText}>{selectedPoi.region}</Text>
               
-              {/* Safety Badge */}
               <View style={[styles.badge, { backgroundColor: selectedPoi.friction_index < 0.8 ? '#f39c12' : '#27ae60' }]}>
                    <Text style={styles.badgeText}>Safety: {Math.round((selectedPoi.friction_index || 1) * 100)}%</Text>
               </View>
 
-              {travelTime && <Text style={styles.timeText}>⏱️ Approx {travelTime} drive</Text>}
+              {/* ROUTE INFO */}
+              <View style={styles.metaRow}>
+                  {travelTime ? (
+                    <>
+                        <Text style={styles.timeText}>⏱️ {travelTime}</Text>
+                        <Text style={[styles.timeText, { marginLeft: 15 }]}>🚗 {travelDistance}</Text>
+                    </>
+                  ) : (
+                    // Logic: If we have user location but no time yet, it's calculating. 
+                    // If no user location, we are waiting for GPS.
+                    <Text style={styles.loadingText}>
+                        {userLocation ? "Calculating route..." : "Waiting for GPS..."}
+                    </Text>
+                  )}
+              </View>
               
               <Text style={styles.desc} numberOfLines={3}>
                  {selectedPoi.description || "No description available."}
@@ -237,25 +263,16 @@ const styles = StyleSheet.create({
       backgroundColor: 'white', padding: 10, borderRadius: 20, elevation: 5
   },
 
-  // Updated Card Style: No padding on parent to allow full-width image
   card: { 
       position: 'absolute', bottom: 30, left: 20, right: 20, 
       backgroundColor: 'white', borderRadius: 20, 
       elevation: 10, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10,
-      overflow: 'hidden' // Ensures image respects rounded corners
+      overflow: 'hidden' 
   },
   
-  // Gallery Styles
-  galleryContainer: { height: 150, width: '100%', backgroundColor: '#eee' },
-  galleryImage: { width: width - 40, height: 150 }, // Width matches card width (screen - margins)
-  galleryBadge: { 
-      position: 'absolute', bottom: 10, right: 10, 
-      backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12,
-      flexDirection: 'row', alignItems: 'center'
-  },
-  galleryBadgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
+  galleryContainer: { height: 160, width: '100%', backgroundColor: '#eee' },
+  galleryImage: { width: width - 40, height: 160 }, 
 
-  // Content Styles
   cardContent: { padding: 20 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
   cardTitle: { fontSize: 20, fontWeight: 'bold', color: '#333', width: '90%' },
@@ -264,7 +281,10 @@ const styles = StyleSheet.create({
   badge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, marginBottom: 10 },
   badgeText: { color: 'white', fontWeight: 'bold', fontSize: 12 },
 
-  timeText: { color: '#d35400', fontWeight: '600', marginBottom: 10 },
+  metaRow: { flexDirection: 'row', marginBottom: 10, height: 20 },
+  timeText: { color: '#d35400', fontWeight: '600' },
+  loadingText: { color: '#999', fontStyle: 'italic' },
+
   desc: { fontSize: 13, color: '#555', marginBottom: 15, lineHeight: 18 },
   
   navBtn: { 
