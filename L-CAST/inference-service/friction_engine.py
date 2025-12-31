@@ -2,7 +2,7 @@ import os
 import requests
 import logging
 import time
-import concurrent.futures # <--- NEW: For Parallel Speed
+import concurrent.futures # <--- KEEPING PARALLEL SPEED
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,6 @@ class FrictionEngine:
     def warm_up_cache(self, coord_list):
         """
         🚀 TURBO MODE: Fetches weather for ALL locations in parallel.
-        Instead of waiting 15s, this takes ~0.5s.
         """
         unique_coords = []
         seen_keys = set()

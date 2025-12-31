@@ -13,37 +13,38 @@ const pool = new Pool({
 
 // Helper to determine AI Service URL
 const getAIUrl = () => {
-    // If running in Docker, use container name. If local, use localhost.
     return process.env.AI_SERVICE_URL || 'http://inference-service:8000';
 };
 
-// 1. DISCOVER (The Master Fix)
+// 1. DISCOVER 
 router.get('/discover', auth, async (req, res) => {
     const { lat, lon, radius = 50000 } = req.query;
 
     try {
         // A. Fetch Candidates from Database
+        // ✅ FIX: Added image_url and distance_meters to SQL query
         const candidates = await pool.query(`
             SELECT id, name, description, region, image_url, base_popularity_score,
-            ST_X(location::geometry) as lon, ST_Y(location::geometry) as lat
+            ST_X(location::geometry) as lon, 
+            ST_Y(location::geometry) as lat,
+            ST_Distance(location, ST_MakePoint($1, $2)::geography) as distance_meters
             FROM pois
             WHERE ST_DWithin(location, ST_MakePoint($1, $2)::geography, $3)
         `, [lon, lat, radius]);
 
-        // B. Fetch Saved IDs (Wishlist)
+        // B. Fetch Saved IDs
         const savedRes = await pool.query('SELECT poi_id FROM itineraries WHERE user_id = $1', [req.user.id]);
         const savedIds = new Set(savedRes.rows.map(r => r.poi_id));
 
-        // C. Call Python Brain (Calculates Friction & Explanations)
+        // C. Call Python Brain
         try {
             const mlResponse = await axios.post(`${getAIUrl()}/v1/recommend`, {
                 user_id: req.user.id,
                 user_interest_profile: "General", 
-                candidates: candidates.rows // Send raw data to AI
-            }, { timeout: 15000 }); // 3s timeout so app doesn't hang
+                candidates: candidates.rows 
+            }, { timeout: 15000 });
 
-            // D. Merge "Saved Status" into AI Results
-            // The AI returns enriched data (friction_index, factors), we just need to add 'is_saved' back
+            // D. Merge "Saved Status"
             const finalResults = mlResponse.data.map(poi => ({
                 ...poi,
                 is_saved: savedIds.has(poi.id)
@@ -52,12 +53,14 @@ router.get('/discover', auth, async (req, res) => {
             res.json(finalResults);
 
         } catch (mlError) {
-            console.error("⚠️ AI Service Error:", mlError.message); 
-            // Fallback: If AI dies, return raw list but mark 'friction' as 1.0 (Safe) so app doesn't crash
+            console.error("⚠️ AI Service Error (Using Fallback):", mlError.message); 
+            
+            // ✅ FIX: Fallback now includes image_url and distance_meters
+            // This ensures images appear even if "Live Safety" is offline
             const fallback = candidates.rows.map(c => ({
                 ...c,
                 is_saved: savedIds.has(c.id),
-                friction_index: 1.0, // Default safe
+                friction_index: 1.0, 
                 safety_factors: [{ icon: "⚠️", label: "Live Safety Offline" }]
             }));
             res.json(fallback);
@@ -72,11 +75,7 @@ router.get('/discover', auth, async (req, res) => {
 // 2. SAVE
 router.post('/save', auth, async (req, res) => {
     const { poi_id } = req.body;
-    // Check if body was parsed
-    if (!poi_id) {
-        console.error("Save Error: Missing poi_id. Check express.json() middleware.");
-        return res.status(400).json({ error: "Missing POI ID" });
-    }
+    if (!poi_id) return res.status(400).json({ error: "Missing POI ID" });
 
     try {
         await pool.query(
@@ -85,12 +84,8 @@ router.post('/save', auth, async (req, res) => {
         );
         res.json({ message: "Saved" });
     } catch (err) {
-        console.error("SAVE FAILED (SQL Error):", err.message);
-        // Specific help for the constraint error
-        if (err.message.includes('ON CONFLICT')) {
-            console.error("HINT: Run 'ALTER TABLE itineraries ADD CONSTRAINT unique_user_poi UNIQUE (user_id, poi_id);'");
-        }
-        res.status(500).json({ error: "Database error during save" });
+        console.error("SAVE ERROR:", err.message);
+        res.status(500).json({ error: "Save failed" });
     }
 });
 
@@ -113,7 +108,7 @@ router.post('/unsave', auth, async (req, res) => {
 router.get('/saved', auth, async (req, res) => {
     try {
         const result = await pool.query(`
-            SELECT DISTINCT p.id, p.name, p.region, p.category 
+            SELECT DISTINCT p.id, p.name, p.region, p.image_url 
             FROM itineraries i 
             JOIN pois p ON i.poi_id = p.id 
             WHERE i.user_id = $1 
@@ -121,7 +116,6 @@ router.get('/saved', auth, async (req, res) => {
         `, [req.user.id]);
         res.json(result.rows);
     } catch (err) {
-        console.error("GET SAVED ERROR:", err);
         res.status(500).json({ error: "Error fetching saved" });
     }
 });
