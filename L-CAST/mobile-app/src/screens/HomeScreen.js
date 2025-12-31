@@ -195,7 +195,15 @@ export default function HomeScreen({ navigation }) {
         keyExtractor={(item) => item.id.toString()}
         renderItem={renderPOI}
         contentContainerStyle={{ paddingBottom: 20 }}
-        extraData={filteredData} // Ensures list re-renders when data attributes change
+        extraData={filteredData}
+        // NEW: Show message when list is empty
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Ionicons name="search-outline" size={60} color="#ccc" />
+            <Text style={styles.emptyText}>No results found.</Text>
+            <Text style={styles.emptySubText}>Try searching for a different name or keyword.</Text>
+          </View>
+        }
       />
     </SafeAreaView>
   );
@@ -215,6 +223,22 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginBottom: 15,
     elevation: 2
+  },
+  emptyContainer: { 
+    alignItems: 'center', 
+    marginTop: 60, 
+    opacity: 0.8 
+  },
+  emptyText: { 
+    fontSize: 18, 
+    fontWeight: 'bold', 
+    color: '#555', 
+    marginTop: 10 
+  },
+  emptySubText: { 
+    fontSize: 14, 
+    color: '#888', 
+    marginTop: 5 
   },
   searchInput: { flex: 1, fontSize: 16 },
 
