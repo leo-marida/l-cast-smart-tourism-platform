@@ -5,6 +5,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 from friction_engine import FrictionEngine
 
+# Load Model Robustly
 def load_robust_model(model_name='all-MiniLM-L6-v2'):
     try:
         print(f"Loading AI Model: {model_name}...")
@@ -27,26 +28,27 @@ class LCastRecommender:
         user_vector = model.encode([user_preferences_string])
         results = []
         
-        # 🚀 STEP 1: PRE-FETCH WEATHER (Parallel - KEEPING THIS)
+        # 🚀 STEP 1: PARALLEL WARM UP (Keeping your logic!)
+        # This makes the loop below instant
         coords = [(p['lat'], p['lon']) for p in poi_list]
         friction_engine.warm_up_cache(coords)
         
         # STEP 2: Process Rankings
         for poi in poi_list:
-            # 1. Similarity (Handle missing description)
+            # 1. Similarity
             text_content = poi.get('description') or poi.get('name', '')
             poi_vector = model.encode([text_content])
             sim_score = cosine_similarity(user_vector, poi_vector)[0][0]
             
-            # 2. Friction (Fast due to cache)
+            # 2. Friction (Fast due to parallel cache)
             mu, factors = friction_engine.calculate_final_mu(poi['lat'], poi['lon'], poi.get('region', 'Unknown'))
             
             # 3. Hybrid Score
             final_score = sim_score * mu
             
-            # ⚠️ THE FIX IS HERE: Use poi.copy()
-            # This preserves 'image_url', 'distance_meters', and 'id' from the database.
-            enriched_poi = poi.copy()
+            # ⚠️ CRITICAL FIX: Use .copy() to preserve Image & Distance
+            # We take the original 'poi' dict (which has image_url) and ADD the scores to it.
+            enriched_poi = poi.copy() 
             enriched_poi.update({
                 "final_score": float(final_score),
                 "match_rate": float(sim_score),
