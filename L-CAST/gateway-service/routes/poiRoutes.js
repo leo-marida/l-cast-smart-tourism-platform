@@ -40,7 +40,7 @@ router.get('/discover', auth, async (req, res) => {
                 user_id: req.user.id,
                 user_interest_profile: "General", 
                 candidates: candidates.rows // Send raw data to AI
-            }, { timeout: 3000 }); // 3s timeout so app doesn't hang
+            }, { timeout: 15000 }); // 3s timeout so app doesn't hang
 
             // D. Merge "Saved Status" into AI Results
             // The AI returns enriched data (friction_index, factors), we just need to add 'is_saved' back
