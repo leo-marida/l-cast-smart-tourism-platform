@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Text, TouchableOpacity, Linking, Image, ScrollView, Dimensions, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, Text, TouchableOpacity, Linking, Image, ScrollView, Dimensions } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
-// Use your key here
 import { GOOGLE_MAPS_API_KEY } from '@env'; 
 
 const { width } = Dimensions.get('window');
@@ -23,19 +22,15 @@ export default function DiscoveryMap({ route, navigation }) {
   const getLatLon = (item) => {
     if (!item) return { lat: 33.8938, lon: 35.5018 }; // Default Beirut
     
-    // 1. Backend sends 'lat' and 'lon' as numbers or strings
+    // 1. Backend sends 'lat' and 'lon' (Home Screen format)
     if (item.lat !== undefined && item.lon !== undefined) {
         return { lat: parseFloat(item.lat), lon: parseFloat(item.lon) };
     }
-    // 2. PostGIS GeoJSON format
+    // 2. PostGIS GeoJSON format (Raw DB format)
     if (item.location?.coordinates) {
         return { lat: item.location.coordinates[1], lon: item.location.coordinates[0] };
     }
-    // 3. Google Maps format fallback
-    if (item.latitude && item.longitude) {
-        return { lat: parseFloat(item.latitude), lon: parseFloat(item.longitude) };
-    }
-
+    // 3. Fallback: If data was stripped, use 0,0 (Safety check)
     return { lat: 33.8938, lon: 35.5018 }; 
   };
 
@@ -49,7 +44,6 @@ export default function DiscoveryMap({ route, navigation }) {
         let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         setUserLocation(loc.coords);
         
-        // Fetch surrounding POIs once we have location
         fetchPois(loc.coords.latitude, loc.coords.longitude);
       } catch (e) {
         console.log("Location Error:", e);
@@ -57,16 +51,18 @@ export default function DiscoveryMap({ route, navigation }) {
     })();
   }, []);
 
-  // 2. LISTEN for Params AND User Location
-  // Only trigger the route calculation when WE HAVE BOTH the target AND the user's location
+  // 2. LISTEN for Params (Fixes Navigation from Home/Profile)
   useEffect(() => {
-    if (route.params?.targetPoi && userLocation) {
+    if (route.params?.targetPoi) {
       const target = route.params.targetPoi;
-      // Trigger selection logic
       setSelectedPoi(target);
-      getRoutePreview(target, userLocation);
+      
+      // If we have user location, calculate route immediately
+      if (userLocation) {
+        getRoutePreview(target, userLocation);
+      }
     }
-  }, [route.params, userLocation]); // <--- Dependency array fixes the Race Condition
+  }, [route.params, userLocation]); 
 
   const fetchPois = async (lat, lon) => {
     try {
@@ -83,17 +79,17 @@ export default function DiscoveryMap({ route, navigation }) {
   const getRoutePreview = async (destination, originLoc) => {
     if (!originLoc || !destination) return;
     
-    // Reset previous route info
     setTravelTime(null);
     setTravelDistance(null);
     setRouteCoords([]);
 
-    if (!GOOGLE_MAPS_API_KEY) {
-        console.warn("No Google Maps API Key");
-        return;
-    }
+    if (!GOOGLE_MAPS_API_KEY) return;
 
     const { lat: destLat, lon: destLon } = getLatLon(destination);
+    
+    // Don't route if we default to Beirut (invalid coords)
+    if (destLat === 33.8938 && destLon === 35.5018 && destination.name !== 'Raouche Rocks') return;
+
     const origin = `${originLoc.latitude},${originLoc.longitude}`;
     const dest = `${destLat},${destLon}`;
 
@@ -107,7 +103,7 @@ export default function DiscoveryMap({ route, navigation }) {
         setTravelTime(leg.duration.text); 
         setTravelDistance(leg.distance.text); 
         
-        // Draw simple line
+        // Decode polyline or simple line
         setRouteCoords([
             { latitude: originLoc.latitude, longitude: originLoc.longitude },
             { latitude: destLat, longitude: destLon }
@@ -120,39 +116,41 @@ export default function DiscoveryMap({ route, navigation }) {
 
   const onMarkerPress = (poi) => {
     setSelectedPoi(poi);
-    // Use current userLocation state
-    if (userLocation) {
-        getRoutePreview(poi, userLocation);
-    }
+    if (userLocation) getRoutePreview(poi, userLocation);
   };
 
   const handleNavigate = () => {
     if (!userLocation || !selectedPoi) return;
-    const { lat: destLat, lon: destLon } = getLatLon(selectedPoi);
-    const url = `https://www.google.com/maps/dir/?api=1&origin=${userLocation.latitude},${userLocation.longitude}&destination=${destLat},${destLon}&travelmode=driving`;
+    const { lat, lon } = getLatLon(selectedPoi);
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${userLocation.latitude},${userLocation.longitude}&destination=${lat},${lon}&travelmode=driving`;
     Linking.openURL(url);
   };
 
   const handleClose = () => {
     setSelectedPoi(null);
     setRouteCoords([]);
+    navigation.setParams({ targetPoi: null }); 
   };
 
   const { lat: regionLat, lon: regionLon } = selectedPoi 
      ? getLatLon(selectedPoi) 
      : (userLocation ? { lat: userLocation.latitude, lon: userLocation.longitude } : { lat: 33.8938, lon: 35.5018 });
 
-  // --- IMAGE LOGIC ---
+  // --- FIXED IMAGE LOGIC ---
   const getGalleryImages = (poi) => {
-    const images = [];
-    if (poi.image_url && poi.image_url.startsWith('http')) {
-        images.push(poi.image_url);
-    } else {
-        // Fallback for visual testing if DB is empty
-        images.push('https://upload.wikimedia.org/wikipedia/commons/thumb/5/5e/Pigeon_Rocks_of_Beirut%2C_Rock_of_Raouche%2C_Beirut%2C_Lebanon.jpg/800px-Pigeon_Rocks_of_Beirut%2C_Rock_of_Raouche%2C_Beirut%2C_Lebanon.jpg');
+    // Robust check: Ensure property exists and is not empty string
+    if (poi && poi.image_url && poi.image_url.length > 5) {
+        return [poi.image_url];
     }
-    return images;
+    // Fallback Image
+    return ['https://upload.wikimedia.org/wikipedia/commons/thumb/5/5e/Pigeon_Rocks_of_Beirut%2C_Rock_of_Raouche%2C_Beirut%2C_Lebanon.jpg/800px-Pigeon_Rocks_of_Beirut%2C_Rock_of_Raouche%2C_Beirut%2C_Lebanon.jpg'];
   };
+
+  // Merge POIs: Ensure the "Selected" item is on the map even if not in "Fetched" list
+  const displayPois = [...pois];
+  if (selectedPoi && !pois.find(p => p.id === selectedPoi.id)) {
+      displayPois.push(selectedPoi);
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -172,12 +170,15 @@ export default function DiscoveryMap({ route, navigation }) {
           longitudeDelta: 0.05,
         }}
       >
-        {isMapReady && pois.map((poi, index) => {
+        {isMapReady && displayPois.map((poi, index) => {
            const { lat, lon } = getLatLon(poi);
            const isSelected = selectedPoi && selectedPoi.id === poi.id;
            let pinColor = 'green';
-           if (poi.friction_index < 0.8) pinColor = 'orange';
-           if (poi.friction_index < 0.5) pinColor = 'red';
+           // Handle case where friction_index might be missing in Saved items
+           const safeScore = poi.friction_index !== undefined ? poi.friction_index : 1.0;
+           
+           if (safeScore < 0.8) pinColor = 'orange';
+           if (safeScore < 0.5) pinColor = 'red';
            if (isSelected) pinColor = 'blue';
 
            return (
@@ -203,7 +204,7 @@ export default function DiscoveryMap({ route, navigation }) {
                         key={i}
                         source={{ uri: imgUrl }} 
                         style={styles.galleryImage}
-                        resizeMode="cover"
+                        resizeMode="cover" 
                      />
                  ))}
              </ScrollView>
@@ -219,11 +220,12 @@ export default function DiscoveryMap({ route, navigation }) {
               
               <Text style={styles.regionText}>{selectedPoi.region}</Text>
               
-              <View style={[styles.badge, { backgroundColor: selectedPoi.friction_index < 0.8 ? '#f39c12' : '#27ae60' }]}>
-                   <Text style={styles.badgeText}>Safety: {Math.round((selectedPoi.friction_index || 1) * 100)}%</Text>
-              </View>
+              {selectedPoi.friction_index !== undefined && (
+                  <View style={[styles.badge, { backgroundColor: selectedPoi.friction_index < 0.8 ? '#f39c12' : '#27ae60' }]}>
+                       <Text style={styles.badgeText}>Safety: {Math.round(selectedPoi.friction_index * 100)}%</Text>
+                  </View>
+              )}
 
-              {/* ROUTE INFO */}
               <View style={styles.metaRow}>
                   {travelTime ? (
                     <>
@@ -231,8 +233,6 @@ export default function DiscoveryMap({ route, navigation }) {
                         <Text style={[styles.timeText, { marginLeft: 15 }]}>🚗 {travelDistance}</Text>
                     </>
                   ) : (
-                    // Logic: If we have user location but no time yet, it's calculating. 
-                    // If no user location, we are waiting for GPS.
                     <Text style={styles.loadingText}>
                         {userLocation ? "Calculating route..." : "Waiting for GPS..."}
                     </Text>
@@ -240,7 +240,7 @@ export default function DiscoveryMap({ route, navigation }) {
               </View>
               
               <Text style={styles.desc} numberOfLines={3}>
-                 {selectedPoi.description || "No description available."}
+                 {selectedPoi.description || "View details for this location."}
               </Text>
               
               <TouchableOpacity style={styles.navBtn} onPress={handleNavigate}>

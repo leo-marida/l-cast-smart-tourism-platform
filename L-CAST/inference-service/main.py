@@ -26,11 +26,11 @@ class POICandidate(BaseModel):
     lat: float  
     lon: float
     base_popularity_score: float = 0.5
+    image_url: Optional[str] = None
+    distance_meters: Optional[float] = None
     
-    # ✅ CRITICAL FIX: This tells Python to ignore 'distance_meters' and 'image_url'
-    # instead of crashing.
     class Config:
-        extra = "ignore" 
+        extra = "allow" 
 
 class ReRankRequest(BaseModel):
     user_id: Optional[int] = None
