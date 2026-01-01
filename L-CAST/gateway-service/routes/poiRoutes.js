@@ -11,16 +11,21 @@ const pool = new Pool({
   database: process.env.POSTGRES_DB
 });
 
+// Helper: Get AI URL safely
 const getAIUrl = () => {
     return process.env.AI_SERVICE_URL || 'http://inference-service:8000';
 };
 
-// 1. DISCOVER 
+// 1. DISCOVER ROUTE
 router.get('/discover', auth, async (req, res) => {
     const { lat, lon, radius = 50000 } = req.query;
 
+    // 👇 ADD THIS VALIDATION BLOCK 👇
+    if (!lat || !lon) {
+        return res.status(400).json({ error: "Latitude and Longitude are required" });
+    }
     try {
-        // A. Fetch Candidates (Ensure image_url and distance_meters are selected)
+        // A. Fetch Data from DB (Includes Image & Distance)
         const candidates = await pool.query(`
             SELECT id, name, description, region, image_url, base_popularity_score,
             ST_X(location::geometry) as lon, 
@@ -34,42 +39,42 @@ router.get('/discover', auth, async (req, res) => {
         const savedRes = await pool.query('SELECT poi_id FROM itineraries WHERE user_id = $1', [req.user.id]);
         const savedIds = new Set(savedRes.rows.map(r => r.poi_id));
 
-        // C. Call Python Brain
+        // C. Try to Call AI
         try {
+            // Short timeout (5s) so the app loads fast even if AI is slow
             const mlResponse = await axios.post(`${getAIUrl()}/v1/recommend`, {
                 user_id: req.user.id,
                 user_interest_profile: "General", 
                 candidates: candidates.rows 
-            }, { timeout: 10000 }); // 10s timeout
+            }, { timeout: 5000 });
 
-            // D. Success: Merge "Saved Status"
+            // Merge Saved Status into AI results
             const finalResults = mlResponse.data.map(poi => ({
                 ...poi,
                 is_saved: savedIds.has(poi.id)
             }));
-
-            res.json(finalResults);
+            return res.json(finalResults);
 
         } catch (mlError) {
-            console.error("⚠️ AI Service Failed (Using Fallback):", mlError.message); 
+            console.log("⚠️ AI Offline/Timeout - Using Database Data");
             
-            // ✅ FIX: The Fallback MUST pass the image_url and distance through
+            // D. Fallback: RETURN DB DATA (Images + Distance will work!)
             const fallback = candidates.rows.map(c => ({
-                ...c, // This contains id, name, region, IMAGE_URL, DISTANCE
+                ...c,
                 is_saved: savedIds.has(c.id),
-                friction_index: 1.0, 
+                friction_index: 1.0, // Default to 100% Safe
                 safety_factors: [{ icon: "⚠️", label: "Live Safety Offline" }]
             }));
-            res.json(fallback);
+            return res.json(fallback);
         }
 
     } catch (err) {
-        console.error("CRITICAL DATABASE ERROR:", err);
-        res.status(500).json({ error: err.message });
+        console.error("CRITICAL BACKEND ERROR:", err);
+        res.status(500).json({ error: "Backend Server Error" });
     }
 });
 
-// 2. SAVE
+// 2. SAVE ROUTE
 router.post('/save', auth, async (req, res) => {
     const { poi_id } = req.body;
     if (!poi_id) return res.status(400).json({ error: "Missing POI ID" });
@@ -81,11 +86,12 @@ router.post('/save', auth, async (req, res) => {
         );
         res.json({ message: "Saved" });
     } catch (err) {
+        console.error("Save Error:", err.message);
         res.status(500).json({ error: "Save failed" });
     }
 });
 
-// 3. UNSAVE
+// 3. UNSAVE ROUTE
 router.post('/unsave', auth, async (req, res) => {
     const { poi_id } = req.body;
     try {
@@ -96,7 +102,7 @@ router.post('/unsave', auth, async (req, res) => {
     }
 });
 
-// 4. GET SAVED
+// 4. GET SAVED ROUTE
 router.get('/saved', auth, async (req, res) => {
     try {
         const result = await pool.query(`

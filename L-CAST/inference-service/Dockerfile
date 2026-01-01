@@ -2,25 +2,27 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
-# 1. Install minimal system tools
+# 1. Install system tools
 RUN apt-get update && apt-get install -y \
     build-essential \
-    --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+# 2. Upgrade pip
+RUN pip install --upgrade pip
 
-# 2. INSTALL PYTORCH CPU FIRST (Pinned & High Timeout)
-# We pin version 2.2.2 to prevent metadata scanning and ensure a smaller download.
-# We increase timeout to 3000s for slow connections.
-RUN pip install --no-cache-dir --default-timeout=10000 \
+# 3. CRITICAL FIX: Force NumPy 1.x BEFORE installing PyTorch
+# This prevents it from pulling the breaking NumPy 2.0 version
+RUN pip install --default-timeout=10000 "numpy<2"
+
+# 4. Install PyTorch (Pinned Version)
+RUN pip install --default-timeout=10000 \
     torch==2.2.2 \
     torchvision==0.17.2 \
     --index-url https://download.pytorch.org/whl/cpu
 
-# 3. Install the rest
-# sentence-transformers will see that torch is already installed and skip downloading the huge GPU version.
-RUN pip install --no-cache-dir --default-timeout=10000 -r requirements.txt
+# 5. Install the rest of the libraries
+COPY requirements.txt .
+RUN pip install --default-timeout=10000 -r requirements.txt
 
 COPY . .
 
