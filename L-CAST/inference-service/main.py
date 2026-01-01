@@ -4,13 +4,11 @@ from typing import List, Optional
 from recommender import LCastRecommender
 import logging
 
-# Setup Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="L-CAST Inference Engine")
 
-# Initialize Brain
 try:
     recommender_engine = LCastRecommender()
     logger.info("AI Model Loaded Successfully")
@@ -26,6 +24,9 @@ class POICandidate(BaseModel):
     lat: float  
     lon: float
     base_popularity_score: float = 0.5
+    
+    # ✅ FIX: Explicitly allow these fields. 
+    # If the database sends them and they aren't here, the AI crashes.
     image_url: Optional[str] = None
     distance_meters: Optional[float] = None
     
@@ -58,5 +59,4 @@ def recommend(payload: ReRankRequest):
 
     except Exception as e:
         logger.error(f"ML ERROR: {str(e)}")
-        # Return 500 so Node.js knows to use fallback
         raise HTTPException(status_code=500, detail=str(e))
