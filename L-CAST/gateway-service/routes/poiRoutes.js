@@ -42,7 +42,7 @@ router.get('/discover', auth, async (req, res) => {
                 user_id: req.user.id,
                 user_interest_profile: "General", 
                 candidates: candidates.rows 
-            }, { timeout: 15000 });
+            }, { timeout: 35000 });
 
             const finalResults = mlResponse.data.map(poi => ({
                 ...poi,
