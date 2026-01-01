@@ -25,8 +25,7 @@ class POICandidate(BaseModel):
     lon: float
     base_popularity_score: float = 0.5
     
-    # ✅ FIX: Explicitly allow these fields. 
-    # If the database sends them and they aren't here, the AI crashes.
+    # ✅ FIX: Explicitly allow these fields to prevent crashing
     image_url: Optional[str] = None
     distance_meters: Optional[float] = None
     
@@ -48,15 +47,12 @@ def recommend(payload: ReRankRequest):
         return []
 
     try:
-        # Convert Pydantic models to clean dictionaries
         poi_data = [poi.dict() for poi in payload.candidates]
-        
         ranked_results = recommender_engine.recommend(
             user_preferences_string=payload.user_interest_profile,
             poi_list=poi_data
         )
         return ranked_results
-
     except Exception as e:
         logger.error(f"ML ERROR: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

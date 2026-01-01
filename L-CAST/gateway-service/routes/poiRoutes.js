@@ -15,15 +15,15 @@ const getAIUrl = () => {
     return process.env.AI_SERVICE_URL || 'http://inference-service:8000';
 };
 
-// ... (imports remain the same)
-
 // 1. DISCOVER ROUTE
 router.get('/discover', auth, async (req, res) => {
     const { lat, lon, radius = 50000 } = req.query;
-    if (!lat || !lon) return res.status(400).json({ error: "Location required" });
+
+    if (!lat || !lon) {
+        return res.status(400).json({ error: "Latitude and Longitude are required" });
+    }
 
     try {
-        // A. Fetch Data
         const candidates = await pool.query(`
             SELECT id, name, description, region, image_url, base_popularity_score,
             ST_X(location::geometry) as lon, 
@@ -33,17 +33,16 @@ router.get('/discover', auth, async (req, res) => {
             WHERE ST_DWithin(location, ST_MakePoint($1, $2)::geography, $3)
         `, [lon, lat, radius]);
 
-        // B. Fetch Saved
         const savedRes = await pool.query('SELECT poi_id FROM itineraries WHERE user_id = $1', [req.user.id]);
         const savedIds = new Set(savedRes.rows.map(r => r.poi_id));
 
-        // C. Call AI (Timeout optimized to 10s for Cold Start)
         try {
+            // ✅ FIX: 15 Seconds Timeout (Prevents "Offline" tag on startup)
             const mlResponse = await axios.post(`${getAIUrl()}/v1/recommend`, {
                 user_id: req.user.id,
                 user_interest_profile: "General", 
                 candidates: candidates.rows 
-            }, { timeout: 15000 }); // 👈 10 Seconds is enough
+            }, { timeout: 15000 });
 
             const finalResults = mlResponse.data.map(poi => ({
                 ...poi,
@@ -63,8 +62,8 @@ router.get('/discover', auth, async (req, res) => {
         }
 
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Server Error" });
+        console.error("CRITICAL BACKEND ERROR:", err);
+        res.status(500).json({ error: "Backend Server Error" });
     }
 });
 
