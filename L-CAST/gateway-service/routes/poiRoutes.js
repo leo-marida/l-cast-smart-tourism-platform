@@ -11,7 +11,6 @@ const pool = new Pool({
   database: process.env.POSTGRES_DB
 });
 
-// Helper to determine AI Service URL
 const getAIUrl = () => {
     return process.env.AI_SERVICE_URL || 'http://inference-service:8000';
 };
@@ -21,8 +20,7 @@ router.get('/discover', auth, async (req, res) => {
     const { lat, lon, radius = 50000 } = req.query;
 
     try {
-        // A. Fetch Candidates from Database
-        // ✅ FIX: Added image_url and distance_meters to SQL query
+        // A. Fetch Candidates (Ensure image_url and distance_meters are selected)
         const candidates = await pool.query(`
             SELECT id, name, description, region, image_url, base_popularity_score,
             ST_X(location::geometry) as lon, 
@@ -42,9 +40,9 @@ router.get('/discover', auth, async (req, res) => {
                 user_id: req.user.id,
                 user_interest_profile: "General", 
                 candidates: candidates.rows 
-            }, { timeout: 15000 });
+            }, { timeout: 10000 }); // 10s timeout
 
-            // D. Merge "Saved Status"
+            // D. Success: Merge "Saved Status"
             const finalResults = mlResponse.data.map(poi => ({
                 ...poi,
                 is_saved: savedIds.has(poi.id)
@@ -53,12 +51,11 @@ router.get('/discover', auth, async (req, res) => {
             res.json(finalResults);
 
         } catch (mlError) {
-            console.error("⚠️ AI Service Error (Using Fallback):", mlError.message); 
+            console.error("⚠️ AI Service Failed (Using Fallback):", mlError.message); 
             
-            // ✅ FIX: Fallback now includes image_url and distance_meters
-            // This ensures images appear even if "Live Safety" is offline
+            // ✅ FIX: The Fallback MUST pass the image_url and distance through
             const fallback = candidates.rows.map(c => ({
-                ...c,
+                ...c, // This contains id, name, region, IMAGE_URL, DISTANCE
                 is_saved: savedIds.has(c.id),
                 friction_index: 1.0, 
                 safety_factors: [{ icon: "⚠️", label: "Live Safety Offline" }]
@@ -67,7 +64,7 @@ router.get('/discover', auth, async (req, res) => {
         }
 
     } catch (err) {
-        console.error("CRITICAL DISCOVER ERROR:", err);
+        console.error("CRITICAL DATABASE ERROR:", err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -84,7 +81,6 @@ router.post('/save', auth, async (req, res) => {
         );
         res.json({ message: "Saved" });
     } catch (err) {
-        console.error("SAVE ERROR:", err.message);
         res.status(500).json({ error: "Save failed" });
     }
 });
@@ -93,13 +89,9 @@ router.post('/save', auth, async (req, res) => {
 router.post('/unsave', auth, async (req, res) => {
     const { poi_id } = req.body;
     try {
-        await pool.query(
-            'DELETE FROM itineraries WHERE user_id = $1 AND poi_id = $2',
-            [req.user.id, poi_id]
-        );
+        await pool.query('DELETE FROM itineraries WHERE user_id = $1 AND poi_id = $2', [req.user.id, poi_id]);
         res.json({ message: "Unsaved" });
     } catch (err) {
-        console.error("UNSAVE ERROR:", err);
         res.status(500).json({ error: "Unsave failed" });
     }
 });
