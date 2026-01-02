@@ -52,6 +52,8 @@ services:
   # Graph DB for Social Connections (CLO3: Polyglot Persistence)
   graph-db:
     image: neo4j:5.12
+    container_name: lcast-graph-db-1
+    restart: always
     ports:
       - "7474:7474" # Browser UI
       - "7687:7687" # Bolt Protocol
