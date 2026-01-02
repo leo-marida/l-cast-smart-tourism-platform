@@ -6,6 +6,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
 import { GOOGLE_MAPS_API_KEY } from '@env'; 
+import { POI_IMAGES } from '../assets/imageMap'; 
+
 
 const { width } = Dimensions.get('window');
 
@@ -137,13 +139,11 @@ export default function DiscoveryMap({ route, navigation }) {
      : (userLocation ? { lat: userLocation.latitude, lon: userLocation.longitude } : { lat: 33.8938, lon: 35.5018 });
 
   // --- FIXED IMAGE LOGIC ---
-  const getGalleryImages = (poi) => {
-    // Robust check: Ensure property exists and is not empty string
-    if (poi && poi.image_url && poi.image_url.length > 5) {
-        return [poi.image_url];
-    }
-    // Fallback Image
-    return ['https://upload.wikimedia.org/wikipedia/commons/thumb/5/5e/Pigeon_Rocks_of_Beirut%2C_Rock_of_Raouche%2C_Beirut%2C_Lebanon.jpg/800px-Pigeon_Rocks_of_Beirut%2C_Rock_of_Raouche%2C_Beirut%2C_Lebanon.jpg'];
+  const getLocalImage = (poiName) => {
+      if (POI_IMAGES[poiName]) {
+          return POI_IMAGES[poiName];
+      }
+      return POI_IMAGES['default'];
   };
 
   // Merge POIs: Ensure the "Selected" item is on the map even if not in "Fetched" list
@@ -199,14 +199,11 @@ export default function DiscoveryMap({ route, navigation }) {
         <View style={styles.card}>
           <View style={styles.galleryContainer}>
              <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
-                 {getGalleryImages(selectedPoi).map((imgUrl, i) => (
-                     <Image 
-                        key={i}
-                        source={{ uri: imgUrl }} 
-                        style={styles.galleryImage}
-                        resizeMode="cover" 
-                     />
-                 ))}
+                 <Image 
+                    source={getLocalImage(selectedPoi.name)} 
+                    style={styles.galleryImage}
+                    resizeMode="cover" 
+                 />
              </ScrollView>
           </View>
 

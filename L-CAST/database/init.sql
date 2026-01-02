@@ -1,7 +1,7 @@
 -- Enable PostGIS
 CREATE EXTENSION IF NOT EXISTS postgis;
 
--- 1. Users Table (Last line has NO comma)
+-- 1. Users Table
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(50) UNIQUE NOT NULL,
@@ -13,17 +13,28 @@ CREATE TABLE users (
 );
 
 -- 2. POIs (The Places)
+-- Merged fields from your previous init and seed files
 CREATE TABLE pois (
     id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
+    name VARCHAR(255) NOT NULL,
     description TEXT,
     category VARCHAR(50),
-    region VARCHAR(50),
+    region VARCHAR(255),
+    
+    -- Geospatial Column
     location GEOGRAPHY(Point, 4326),
-    image_url TEXT,
-    base_popularity_score FLOAT DEFAULT 1.0,
-    safety_status VARCHAR(20) DEFAULT 'Safe'
+    
+    -- Metrics
+    base_popularity_score FLOAT DEFAULT 0.5,
+    friction_index FLOAT DEFAULT 1.0,  -- 1.0 = 100% Safe
+    safety_status VARCHAR(20) DEFAULT 'Safe',
+    
+    -- Image URL (We keep this column to prevent backend errors, 
+    -- but we will leave it empty since frontend uses local images)
+    image_url TEXT
 );
+
+-- Create Spatial Index for fast "Near Me" queries
 CREATE INDEX poi_location_idx ON pois USING GIST (location);
 
 -- 3. Social Feed
@@ -43,7 +54,7 @@ CREATE TABLE post_likes (
     PRIMARY KEY (user_id, post_id)
 );
 
--- 4. Itineraries (Comma added after created_at because UNIQUE follows)
+-- 4. Itineraries
 CREATE TABLE itineraries (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id),
