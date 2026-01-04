@@ -252,9 +252,9 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: 16 },
 
-  card: { backgroundColor: 'white', padding: 15, borderRadius: 15, marginBottom: 15, elevation: 4 },
+  card: { backgroundColor: 'white', padding: 13, borderRadius: 15, marginBottom: 15, elevation: 4 },
   header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
-  name: { fontSize: 18, fontWeight: 'bold', color: '#2c3e50', width: '65%' }, // added width to prevent text overlap
+  name: { fontSize: 17, fontWeight: 'bold', color: '#2c3e50', width: '65%' }, // added width to prevent text overlap
   region: { fontSize: 14, color: 'gray' },
   score: { fontWeight: '900', fontSize: 16 },
 
