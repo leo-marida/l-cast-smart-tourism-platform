@@ -166,7 +166,17 @@ export default function HomeScreen({ navigation }) {
     );
   };
 
-  if (loading) return <ActivityIndicator size="large" style={{ flex: 1, marginTop: 50 }} />;
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <View style={styles.loadingContent}>
+          <Text style={styles.loadingText}>Analyzing Real-Time Context...</Text>
+          <Text style={styles.loadingSubText}>Updating safety scores & weather for all locations</Text>
+          <ActivityIndicator size="large" color="#007AFF" style={{ marginTop: 20 }} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -254,4 +264,25 @@ const styles = StyleSheet.create({
   factorContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   factorBadge: { backgroundColor: '#f0f2f5', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, flexDirection: 'row', alignItems: 'center' },
   factorText: { fontSize: 12, fontWeight: '600', color: '#555' },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingContent: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
+  loadingSubText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+  },
 });
