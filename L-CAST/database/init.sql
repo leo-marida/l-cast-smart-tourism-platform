@@ -67,3 +67,13 @@ CREATE TABLE itineraries (
 -- 5. Seeding Admin
 INSERT INTO users (username, email, password_hash, role) 
 VALUES ('SuperAdmin', 'admin@lcast.lb', '$2a$12$GwS.G6.y/W.t8/W.t8/W.t8/W.t8/W.t8/W.t8/W.t8', 'admin');
+
+-- 6. Follows Table (Social Graph)
+CREATE TABLE follows (
+    follower_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    following_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (follower_id, following_id),
+    -- Prevent users from following themselves
+    CONSTRAINT check_not_self_follow CHECK (follower_id <> following_id)
+);

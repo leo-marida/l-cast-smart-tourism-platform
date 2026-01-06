@@ -29,6 +29,39 @@ router.get('/feed', auth, async (req, res) => {
     }
 });
 
+// FOLLOW A USER
+router.post('/user/:id/follow', auth, async (req, res) => {
+    const targetUserId = req.params.id;
+    const myId = req.user.id;
+    try {
+        await pool.query(
+            'INSERT INTO follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            [myId, targetUserId]
+        );
+        res.json({ success: true, message: 'Followed' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET USER PROFILE DATA (Counts)
+router.get('/user/:id/profile', auth, async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const profile = await pool.query('SELECT username, created_at FROM users WHERE id = $1', [userId]);
+        const followers = await pool.query('SELECT COUNT(*) FROM follows WHERE following_id = $1', [userId]);
+        const following = await pool.query('SELECT COUNT(*) FROM follows WHERE follower_id = $1', [userId]);
+        
+        res.json({
+            ...profile.rows[0],
+            followersCount: followers.rows[0].count,
+            followingCount: following.rows[0].count
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // CREATE POST
 router.post('/post', auth, async (req, res) => {
     const { content, poi_id } = req.body;
