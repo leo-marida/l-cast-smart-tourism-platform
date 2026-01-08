@@ -13,7 +13,8 @@ import OnboardingScreen from './src/screens/OnboardingScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import DiscoveryMap from './src/screens/DiscoveryMap';
 import SocialFeed from './src/screens/SocialFeed';
-import ProfileScreen from './src/screens/ProfileScreen'; // <--- NEW
+import ProfileScreen from './src/screens/ProfileScreen';
+import UserListScreen from './src/screens/UserListScreen'; // <--- 1. IMPORT THIS
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -45,7 +46,6 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [initialRoute, setInitialRoute] = useState('Login');
 
-  // CHECK LOGIN STATUS ON STARTUP
   useEffect(() => {
     checkLogin();
   }, []);
@@ -53,7 +53,7 @@ export default function App() {
   const checkLogin = async () => {
     const token = await AsyncStorage.getItem('userToken');
     if (token) {
-      setInitialRoute('Home'); // Skip login if token exists
+      setInitialRoute('Home'); 
     }
     setLoading(false);
   };
@@ -67,6 +67,17 @@ export default function App() {
         <Stack.Screen name="Register" component={RegisterScreen} options={{ title: 'Create Account' }} />
         <Stack.Screen name="Onboarding" component={OnboardingScreen} />
         <Stack.Screen name="Home" component={MainAppTabs} options={{ headerShown: false }} />
+        
+        {/* --- 2. ADD THIS STACK SCREEN --- */}
+        {/* This lives "outside" the tabs, so it slides over the top of the app */}
+        <Stack.Screen 
+          name="UserList" 
+          component={UserListScreen} 
+          options={({ route }) => ({ 
+            title: route.params?.type || 'Users', // Sets title to "Followers" or "Following"
+            headerShown: true // Show header so user can click 'Back'
+          })} 
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

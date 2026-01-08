@@ -78,6 +78,36 @@ router.delete('/user/:id/unfollow', auth, async (req, res) => {
     }
 });
 
+// GET LIST OF FOLLOWERS
+router.get('/user/:id/followers', auth, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT u.id, u.username 
+            FROM users u
+            JOIN follows f ON u.id = f.follower_id
+            WHERE f.following_id = $1
+        `, [req.params.id]);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET LIST OF PEOPLE USER IS FOLLOWING
+router.get('/user/:id/following', auth, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT u.id, u.username 
+            FROM users u
+            JOIN follows f ON u.id = f.following_id
+            WHERE f.follower_id = $1
+        `, [req.params.id]);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // GET CURRENT USER LOGGED IN (Add to socialRoutes.js)
 router.get('/user/me/profile', auth, async (req, res) => {
     try {
