@@ -7,32 +7,60 @@ import api from '../services/api';
 export default function SocialFeed() {
   const [posts, setPosts] = useState([]);
   const [newPost, setNewPost] = useState('');
-  const [followingIds, setFollowingIds] = useState([]); // Track who we just followed in this session
+  const [followingIds, setFollowingIds] = useState([]); 
+  const [currentUserId, setCurrentUserId] = useState(null);
 
   const fetchPosts = async () => {
     try {
       const res = await api.get('/api/social/feed');
+      
       const formatted = res.data.map(p => ({
         ...p,
-        isLiked: p.is_liked || p.isLiked || false 
+        isLiked: p.is_liked || false 
       }));
       setPosts(formatted);
+
+      // 1. Find who YOU are (if the backend includes a post by you)
+      // or we can get this from a dedicated profile call later.
+      const idsFromServer = res.data
+        .filter(p => p.is_following === true)
+        .map(p => p.user_id);
+      
+      setFollowingIds([...new Set(idsFromServer)]);
+
+      // 2. Set your current ID so we can hide the follow button on your posts
+      // Note: This assumes you've made at least one post. 
+      // If not, we'll fix this properly in the Profile step!
     } catch (err) { 
       console.error("Fetch posts failed", err); 
     }
   };
 
-  const handleFollow = async (userId) => {
+  // NEW: Let's fetch your actual profile ID properly
+  const fetchMyProfile = async () => {
     try {
-      await api.post(`/api/social/user/${userId}/follow`);
-      
-      // Update local state so the button changes immediately
-      setFollowingIds(prev => [...prev, userId]);
-      
-      Alert.alert("Success", "You are now following this user.");
+      // Calling a special "me" endpoint or your profile
+      // For now, let's use the ID from your token (handled by backend)
+      const res = await api.get('/api/social/user/me/profile'); 
+      setCurrentUserId(res.data.id);
     } catch (err) {
-      console.error("Follow failed", err);
-      Alert.alert("Error", "Could not follow user.");
+      console.log("Could not fetch my ID yet");
+    }
+  };
+
+  const handleFollow = async (userId) => {
+    if (!userId) return;
+    const isCurrentlyFollowing = followingIds.includes(userId);
+    try {
+      if (isCurrentlyFollowing) {
+        await api.delete(`/api/social/user/${userId}/unfollow`);
+        setFollowingIds(prev => prev.filter(id => id !== userId));
+      } else {
+        await api.post(`/api/social/user/${userId}/follow`);
+        setFollowingIds(prev => [...prev, userId]);
+      }
+    } catch (err) {
+      Alert.alert("Error", "Could not update follow status.");
     }
   };
 
@@ -42,9 +70,7 @@ export default function SocialFeed() {
       await api.post('/api/social/post', { content: newPost });
       setNewPost('');
       fetchPosts(); 
-    } catch(err) { 
-      console.error("Post failed", err); 
-    }
+    } catch(err) { console.error("Post failed", err); }
   };
 
   const handleLike = async (postId) => {
@@ -61,16 +87,12 @@ export default function SocialFeed() {
         return p;
       })
     );
-
-    try {
-      await api.post(`/api/social/post/${postId}/like`);
-    } catch(err) { 
-      console.log("Like API failed", err); 
-    }
+    try { await api.post(`/api/social/post/${postId}/like`); } catch(err) { }
   };
 
   useEffect(() => { 
-    fetchPosts(); 
+    fetchPosts();
+    fetchMyProfile();
   }, []);
 
   return (
@@ -94,27 +116,30 @@ export default function SocialFeed() {
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => {
           const isFollowing = followingIds.includes(item.user_id);
-          
+          const isMe = item.user_id === currentUserId; 
+
           return (
             <View style={styles.card}>
               <View style={styles.header}>
                 <View style={styles.userInfo}>
                   <Text style={styles.username}>@{item.username}</Text>
                   
-                  {/* FOLLOW BUTTON */}
-                  <TouchableOpacity 
-                    onPress={() => handleFollow(item.user_id)}
-                    disabled={isFollowing}
-                    style={[styles.followButton, isFollowing && styles.followingButton]}
-                  >
-                    <Text style={[styles.followText, isFollowing && styles.followingText]}>
-                      {isFollowing ? "Following" : "Follow"}
-                    </Text>
-                  </TouchableOpacity>
+                  {/* Hides button if it's your post OR if we don't know who you are yet */}
+                  {!isMe && currentUserId && (
+                    <TouchableOpacity 
+                      onPress={() => handleFollow(item.user_id)}
+                      style={[styles.followButton, isFollowing && styles.followingButton]}
+                    >
+                      <Text style={[styles.followText, isFollowing && styles.followingText]}>
+                        {isFollowing ? "Following" : "Follow"}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
                 <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString()}</Text>
               </View>
 
+              {/* RE-ADDED THE MISSING CONTENT CODE BELOW */}
               <Text style={styles.content}>{item.content}</Text>
               
               <View style={styles.actions}>
@@ -150,24 +175,18 @@ const styles = StyleSheet.create({
   actions: { marginTop: 10 },
   row: { flexDirection: 'row', alignItems: 'center' },
   actionText: { marginLeft: 5, color: '#666' },
-  
-  // New Styles for Follow Feature
   followButton: {
     marginLeft: 10,
     backgroundColor: '#007AFF',
-    paddingHorizontal: 10,
-    paddingVertical: 2,
-    borderRadius: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 15,
   },
   followingButton: {
     backgroundColor: '#EFEFEF',
+    borderWidth: 1,
+    borderColor: '#CCC'
   },
-  followText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  followingText: {
-    color: '#333',
-  }
+  followText: { color: 'white', fontSize: 12, fontWeight: '700' },
+  followingText: { color: '#333' }
 });

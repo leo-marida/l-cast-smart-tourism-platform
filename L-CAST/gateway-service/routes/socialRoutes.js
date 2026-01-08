@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { Pool } = require('pg');
-const auth = require('../middleware/auth'); // Check previous response for this file
+const auth = require('../middleware/auth');
 
 const pool = new Pool({
     host: process.env.POSTGRES_HOST,
@@ -10,21 +10,32 @@ const pool = new Pool({
     database: process.env.POSTGRES_DB
 });
 
-// GET FEED
-// GET FEED (Now checks if YOU liked it)
+// GET FEED (Now identifies if YOU follow the author and if YOU liked the post)
 router.get('/feed', auth, async (req, res) => {
     try {
+        const myId = req.user.id;
         const query = `
-            SELECT p.id, p.content, p.created_at, p.likes_count, u.username,
-            EXISTS(SELECT 1 FROM post_likes pl WHERE pl.post_id = p.id AND pl.user_id = $1) as is_liked
+            SELECT 
+                p.id, 
+                p.content, 
+                p.created_at, 
+                p.likes_count, 
+                u.username, 
+                u.id AS user_id,
+                -- Check if the current user (myId) is following this post's author
+                EXISTS (SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = u.id) AS is_following,
+                -- Check if the current user (myId) has liked this post
+                EXISTS (SELECT 1 FROM post_likes WHERE user_id = $1 AND post_id = p.id) AS is_liked
             FROM posts p 
             JOIN users u ON p.user_id = u.id 
             ORDER BY p.created_at DESC 
             LIMIT 50
         `;
-        const result = await pool.query(query, [req.user.id]);
+        const result = await pool.query(query, [myId]);
+        
         res.json(result.rows);
     } catch (err) {
+        console.error("FEED ERROR:", err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -33,12 +44,45 @@ router.get('/feed', auth, async (req, res) => {
 router.post('/user/:id/follow', auth, async (req, res) => {
     const targetUserId = req.params.id;
     const myId = req.user.id;
+    
+    if (myId == targetUserId) {
+        return res.status(400).json({ error: "You cannot follow yourself" });
+    }
+
     try {
         await pool.query(
             'INSERT INTO follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
             [myId, targetUserId]
         );
         res.json({ success: true, message: 'Followed' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// UNFOLLOW A USER (Fixed to use pool instead of req.pool)
+router.delete('/user/:id/unfollow', auth, async (req, res) => {
+    try {
+        const targetUserId = req.params.id;
+        const myId = req.user.id;
+
+        await pool.query(
+            'DELETE FROM follows WHERE follower_id = $1 AND following_id = $2',
+            [myId, targetUserId]
+        );
+
+        res.json({ success: true, message: 'Unfollowed' });
+    } catch (err) {
+        console.error("UNFOLLOW ERROR:", err.message);
+        res.status(500).json({ error: "Database error during unfollow" });
+    }
+});
+
+// GET CURRENT USER LOGGED IN (Add to socialRoutes.js)
+router.get('/user/me/profile', auth, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT id, username FROM users WHERE id = $1', [req.user.id]);
+        res.json(result.rows[0]);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -52,10 +96,12 @@ router.get('/user/:id/profile', auth, async (req, res) => {
         const followers = await pool.query('SELECT COUNT(*) FROM follows WHERE following_id = $1', [userId]);
         const following = await pool.query('SELECT COUNT(*) FROM follows WHERE follower_id = $1', [userId]);
         
+        if (profile.rows.length === 0) return res.status(404).json({ error: "User not found" });
+
         res.json({
             ...profile.rows[0],
-            followersCount: followers.rows[0].count,
-            followingCount: following.rows[0].count
+            followersCount: parseInt(followers.rows[0].count),
+            followingCount: parseInt(following.rows[0].count)
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -81,16 +127,12 @@ router.post('/post/:id/like', auth, async (req, res) => {
     const postId = req.params.id;
     const userId = req.user.id;
     try {
-        // Simple toggle logic (MVP)
-        // 1. Check if liked
         const check = await pool.query('SELECT * FROM post_likes WHERE user_id=$1 AND post_id=$2', [userId, postId]);
         
         if (check.rows.length > 0) {
-            // Unlike
             await pool.query('DELETE FROM post_likes WHERE user_id=$1 AND post_id=$2', [userId, postId]);
-            await pool.query('UPDATE posts SET likes_count = likes_count - 1 WHERE id=$1', [postId]);
+            await pool.query('UPDATE posts SET likes_count = GREATEST(0, likes_count - 1) WHERE id=$1', [postId]);
         } else {
-            // Like
             await pool.query('INSERT INTO post_likes (user_id, post_id) VALUES ($1, $2)', [userId, postId]);
             await pool.query('UPDATE posts SET likes_count = likes_count + 1 WHERE id=$1', [postId]);
         }

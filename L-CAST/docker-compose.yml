@@ -5,6 +5,8 @@ services:
     ports:
       - "3000:3000"
     env_file: .env
+    volumes:
+      - ./gateway-service:/usr/src/app
     environment:
       - POSTGRES_HOST=database
       - REDIS_HOST=cache
