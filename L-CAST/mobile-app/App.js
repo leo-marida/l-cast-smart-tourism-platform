@@ -14,7 +14,8 @@ import HomeScreen from './src/screens/HomeScreen';
 import DiscoveryMap from './src/screens/DiscoveryMap';
 import SocialFeed from './src/screens/SocialFeed';
 import ProfileScreen from './src/screens/ProfileScreen';
-import UserListScreen from './src/screens/UserListScreen'; // <--- 1. IMPORT THIS
+import UserListScreen from './src/screens/UserListScreen';
+import PostDetail from './src/screens/PostDetail'; // 1. IMPORT POST DETAIL
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -68,15 +69,23 @@ export default function App() {
         <Stack.Screen name="Onboarding" component={OnboardingScreen} />
         <Stack.Screen name="Home" component={MainAppTabs} options={{ headerShown: false }} />
         
-        {/* --- 2. ADD THIS STACK SCREEN --- */}
-        {/* This lives "outside" the tabs, so it slides over the top of the app */}
         <Stack.Screen 
           name="UserList" 
           component={UserListScreen} 
           options={({ route }) => ({ 
-            title: route.params?.type || 'Users', // Sets title to "Followers" or "Following"
-            headerShown: true // Show header so user can click 'Back'
+            title: route.params?.type || 'Users',
+            headerShown: true 
           })} 
+        />
+
+        {/* 2. ADD POST DETAIL SCREEN HERE */}
+        <Stack.Screen 
+          name="PostDetail" 
+          component={PostDetail} 
+          options={{ 
+            title: 'Post', 
+            headerShown: true // Allow user to go back to the feed
+          }} 
         />
       </Stack.Navigator>
     </NavigationContainer>

@@ -2,11 +2,12 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const path = require('path');
 const { Pool } = require('pg');
 
 const app = express();
 
-// Database Configuration (Moved from app.js)
+// Database Configuration
 const pool = new Pool({
   user: process.env.POSTGRES_USER,
   host: 'database',
@@ -15,17 +16,25 @@ const pool = new Pool({
   port: 5432,
 });
 
-// Attach pool to req so routes can use it
 app.use((req, res, next) => {
   req.pool = pool;
   next();
 });
 
-app.use(helmet());
+// 2. UPDATE HELMET TO ALLOW IMAGES
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false, // Allows the mobile app to see the images
+  })
+);
+
 app.use(cors());
 app.use(express.json());
 
-// Routes - This uses the folders your teammate set up
+// 3. SERVE THE UPLOADS FOLDER STATICALLY
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Routes
 app.use('/auth', require('./routes/authRoutes'));
 app.use('/api/pois', require('./routes/poiRoutes')); 
 app.use('/api/social', require('./routes/socialRoutes'));

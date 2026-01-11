@@ -1,118 +1,177 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { 
+  View, Text, FlatList, TextInput, TouchableOpacity, 
+  StyleSheet, Alert, Image, Animated, RefreshControl 
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker'; 
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import api from '../services/api';
 
 export default function SocialFeed() {
   const [posts, setPosts] = useState([]);
   const [newPost, setNewPost] = useState('');
+  const [selectedImage, setSelectedImage] = useState(null); 
   const [followingIds, setFollowingIds] = useState([]); 
   const [currentUserId, setCurrentUserId] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const navigation = useNavigation();
+  const BASE_URL = api.defaults.baseURL;
+
+  // --- ANIMATION LOGIC ---
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const lastScrollY = useRef(0);
+  const headerTranslate = useRef(new Animated.Value(0)).current;
+
+  const handleScroll = Animated.event(
+    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+    {
+      useNativeDriver: true,
+      listener: (event) => {
+        const currentY = event.nativeEvent.contentOffset.y;
+        const diff = currentY - lastScrollY.current;
+
+        if (currentY <= 0) {
+          Animated.spring(headerTranslate, { toValue: 0, useNativeDriver: true }).start();
+        } else if (diff > 5) {
+          Animated.timing(headerTranslate, { toValue: -300, duration: 200, useNativeDriver: true }).start();
+        } else if (diff < -5) {
+          Animated.timing(headerTranslate, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+        }
+        lastScrollY.current = currentY;
+      },
+    }
+  );
 
   const fetchPosts = async () => {
     try {
       const res = await api.get('/api/social/feed');
-      
-      const formatted = res.data.map(p => ({
-        ...p,
-        isLiked: p.is_liked || false 
-      }));
-      setPosts(formatted);
-
-      // 1. Find who YOU are (if the backend includes a post by you)
-      // or we can get this from a dedicated profile call later.
-      const idsFromServer = res.data
-        .filter(p => p.is_following === true)
-        .map(p => p.user_id);
-      
+      // Ensure we treat the comment_count as a number right away
+      setPosts(res.data.map(p => ({ 
+        ...p, 
+        isLiked: p.is_liked || false,
+        comment_count: parseInt(p.comment_count) || 0 
+      })));
+      const idsFromServer = res.data.filter(p => p.is_following === true).map(p => p.user_id);
       setFollowingIds([...new Set(idsFromServer)]);
-
-      // 2. Set your current ID so we can hide the follow button on your posts
-      // Note: This assumes you've made at least one post. 
-      // If not, we'll fix this properly in the Profile step!
-    } catch (err) { 
-      console.error("Fetch posts failed", err); 
-    }
+    } catch (err) { console.error(err); }
   };
 
-  // NEW: Let's fetch your actual profile ID properly
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchPosts();
+    setRefreshing(false);
+  };
+
   const fetchMyProfile = async () => {
     try {
-      // Calling a special "me" endpoint or your profile
-      // For now, let's use the ID from your token (handled by backend)
       const res = await api.get('/api/social/user/me/profile'); 
       setCurrentUserId(res.data.id);
-    } catch (err) {
-      console.log("Could not fetch my ID yet");
-    }
+    } catch (err) { console.log(err); }
   };
 
-  const handleFollow = async (userId) => {
-    if (!userId) return;
-    const isCurrentlyFollowing = followingIds.includes(userId);
-    try {
-      if (isCurrentlyFollowing) {
-        await api.delete(`/api/social/user/${userId}/unfollow`);
-        setFollowingIds(prev => prev.filter(id => id !== userId));
-      } else {
-        await api.post(`/api/social/user/${userId}/follow`);
-        setFollowingIds(prev => [...prev, userId]);
-      }
-    } catch (err) {
-      Alert.alert("Error", "Could not update follow status.");
-    }
-  };
+  // --- REFRESH ON FOCUS ---
+  // This triggers when returning from PostDetail to update comment counts
+  useFocusEffect(
+    useCallback(() => {
+      fetchPosts();
+    }, [])
+  );
 
-  const handlePost = async () => {
-    if (!newPost) return;
-    try {
-      await api.post('/api/social/post', { content: newPost });
-      setNewPost('');
-      fetchPosts(); 
-    } catch(err) { console.error("Post failed", err); }
-  };
-
-  const handleLike = async (postId) => {
-    setPosts(currentPosts => 
-      currentPosts.map(p => {
-        if (p.id === postId) {
-          const newState = !p.isLiked;
-          return { 
-            ...p, 
-            isLiked: newState, 
-            likes_count: newState ? (p.likes_count || 0) + 1 : (p.likes_count || 1) - 1 
-          };
-        }
-        return p;
-      })
-    );
-    try { await api.post(`/api/social/post/${postId}/like`); } catch(err) { }
-  };
-
-  useEffect(() => { 
-    fetchPosts();
+  useEffect(() => {
     fetchMyProfile();
   }, []);
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <Text style={styles.headerTitle}>Community Pulse</Text>
-      
-      <View style={styles.inputContainer}>
-        <TextInput 
-          style={styles.input} 
-          placeholder="Share a safety update..." 
-          value={newPost}
-          onChangeText={setNewPost}
-        />
-        <TouchableOpacity onPress={handlePost} style={styles.postButton}>
-          <Ionicons name="send" size={24} color="white" />
-        </TouchableOpacity>
-      </View>
+  const pickImage = async () => {
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+    });
+    if (!result.canceled) setSelectedImage(result.assets[0].uri);
+  };
 
-      <FlatList
+  const handlePost = async () => {
+    if (!newPost && !selectedImage) return;
+    try {
+      const formData = new FormData();
+      formData.append('content', newPost);
+      if (selectedImage) {
+        const filename = selectedImage.split('/').pop();
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? `image/${match[1]}` : `image`;
+        formData.append('image', { uri: selectedImage, name: filename, type });
+      }
+      await api.post('/api/social/post', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setNewPost(''); setSelectedImage(null); fetchPosts(); 
+    } catch(err) { Alert.alert("Error", "Could not upload post."); }
+  };
+
+  const handleFollow = async (userId) => {
+    const isCurrentlyFollowing = followingIds.includes(userId);
+    setFollowingIds(prev => isCurrentlyFollowing ? prev.filter(id => id !== userId) : [...prev, userId]);
+    try {
+      if (isCurrentlyFollowing) await api.delete(`/api/social/user/${userId}/unfollow`);
+      else await api.post(`/api/social/user/${userId}/follow`);
+    } catch (err) { fetchPosts(); }
+  };
+
+  const handleLike = async (postId) => {
+    setPosts(curr => curr.map(p => {
+      if (p.id === postId) {
+        const newState = !p.isLiked;
+        return { ...p, isLiked: newState, likes_count: newState ? (p.likes_count || 0) + 1 : (p.likes_count || 1) - 1 };
+      }
+      return p;
+    }));
+    try { await api.post(`/api/social/post/${postId}/like`); } catch(err) { }
+  };
+
+  return (
+    <View style={styles.container}>
+      <SafeAreaView edges={['top']} style={{ backgroundColor: 'white', zIndex: 11 }} />
+      
+      <Animated.View style={[styles.headerContainer, { transform: [{ translateY: headerTranslate }] }]}>
+        <Text style={styles.headerTitle}>Community Pulse</Text>
+        <View style={styles.createPostContainer}>
+          <TextInput 
+            style={styles.postInput} 
+            placeholder="What's happening?" 
+            multiline 
+            value={newPost} 
+            onChangeText={setNewPost} 
+          />
+          {selectedImage && (
+            <View style={styles.previewContainer}>
+              <Image source={{ uri: selectedImage }} style={styles.imagePreview} />
+              <TouchableOpacity style={styles.removeImage} onPress={() => setSelectedImage(null)}>
+                <Ionicons name="close-circle" size={24} color="red" />
+              </TouchableOpacity>
+            </View>
+          )}
+          <View style={styles.createPostActions}>
+            <TouchableOpacity onPress={pickImage} style={styles.iconButton}>
+              <Ionicons name="image-outline" size={24} color="#007AFF" />
+              <Text style={styles.iconText}>Photo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handlePost} style={[styles.publishButton, (!newPost && !selectedImage) && styles.disabledButton]}>
+              <Text style={styles.publishButtonText}>Post</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Animated.View>
+
+      <Animated.FlatList
         data={posts}
+        contentContainerStyle={{ paddingTop: 210, paddingBottom: 100 }}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} progressViewOffset={210} />
+        }
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => {
           const isFollowing = followingIds.includes(item.user_id);
@@ -122,71 +181,103 @@ export default function SocialFeed() {
             <View style={styles.card}>
               <View style={styles.header}>
                 <View style={styles.userInfo}>
-                  <Text style={styles.username}>@{item.username}</Text>
-                  
-                  {/* Hides button if it's your post OR if we don't know who you are yet */}
-                  {!isMe && currentUserId && (
-                    <TouchableOpacity 
-                      onPress={() => handleFollow(item.user_id)}
-                      style={[styles.followButton, isFollowing && styles.followingButton]}
-                    >
-                      <Text style={[styles.followText, isFollowing && styles.followingText]}>
-                        {isFollowing ? "Following" : "Follow"}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
+                  <View style={styles.avatarPlaceholder}>
+                     <Text style={styles.avatarLetter}>{item.username ? item.username[0].toUpperCase() : '?'}</Text>
+                  </View>
+                  <View>
+                    <Text style={styles.username}>@{item.username}</Text>
+                    <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString()}</Text>
+                  </View>
                 </View>
-                <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString()}</Text>
+                {!isMe && currentUserId && (
+                  <TouchableOpacity onPress={() => handleFollow(item.user_id)} style={isFollowing ? styles.followingBadge : styles.followTextButton}>
+                    <Text style={isFollowing ? styles.followingBadgeText : styles.followLinkText}>
+                      {isFollowing ? "Following" : "+ Follow"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
-              {/* RE-ADDED THE MISSING CONTENT CODE BELOW */}
-              <Text style={styles.content}>{item.content}</Text>
+              <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('PostDetail', { post: item })}>
+                <Text style={styles.content}>{item.content}</Text>
+                {item.image_url && (
+                  <Image source={{ uri: `${BASE_URL}${item.image_url}` }} style={styles.postImage} resizeMode="cover" />
+                )}
+                
+                {item.comment_count > 0 && (
+                  <View style={styles.commentPreviewArea}>
+                    {item.latest_comments && item.latest_comments.map(comment => (
+                      <Text key={comment.id} style={styles.previewCommentText} numberOfLines={1}>
+                        <Text style={styles.previewCommentUser}>{comment.username}: </Text>{comment.content}
+                      </Text>
+                    ))}
+                    <Text style={styles.viewMoreText}>View all {item.comment_count} comments...</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
               
+              <View style={styles.divider} />
               <View style={styles.actions}>
-                <TouchableOpacity onPress={() => handleLike(item.id)} style={styles.row}>
-                  <Ionicons 
-                    name={item.isLiked ? "heart" : "heart-outline"} 
-                    size={20} 
-                    color={item.isLiked ? "red" : "gray"} 
-                  />
+                <TouchableOpacity onPress={() => handleLike(item.id)} style={styles.actionItem}>
+                  <Ionicons name={item.isLiked ? "heart" : "heart-outline"} size={22} color={item.isLiked ? "#e74c3c" : "#666"} />
                   <Text style={styles.actionText}>{item.likes_count || 0}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={() => navigation.navigate('PostDetail', { post: item })} style={styles.actionItem}>
+                  <Ionicons name="chatbubble-outline" size={20} color="#666" />
+                  <Text style={styles.actionText}>{item.comment_count}</Text>
                 </TouchableOpacity>
               </View>
             </View>
           );
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5', paddingHorizontal: 10 },
-  headerTitle: { fontSize: 22, fontWeight:'bold', marginVertical: 10, marginLeft: 5 },
-  inputContainer: { flexDirection: 'row', marginBottom: 15, alignItems:'center' },
-  input: { flex: 1, backgroundColor: 'white', padding: 12, borderRadius: 20, elevation: 1 },
-  postButton: { backgroundColor: '#007AFF', padding: 10, borderRadius: 20, marginLeft: 10 },
-  card: { backgroundColor: 'white', padding: 15, borderRadius: 10, marginBottom: 10, elevation: 2 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
+  container: { flex: 1, backgroundColor: '#f0f2f5' },
+  headerContainer: {
+    position: 'absolute',
+    top: 0, 
+    marginTop: 30,
+    left: 0, 
+    right: 0,
+    zIndex: 10,
+    backgroundColor: '#f0f2f5',
+  },
+  headerTitle: { fontSize: 24, fontWeight:'bold', padding: 15, backgroundColor: 'white' },
+  createPostContainer: { backgroundColor: 'white', padding: 15, marginBottom: 10, borderBottomWidth: 1, borderBottomColor: '#ddd' },
+  postInput: { fontSize: 16, minHeight: 60, textAlignVertical: 'top' },
+  createPostActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 10 },
+  iconButton: { flexDirection: 'row', alignItems: 'center' },
+  iconText: { marginLeft: 5, color: '#666', fontWeight: '600' },
+  publishButton: { backgroundColor: '#007AFF', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20 },
+  disabledButton: { backgroundColor: '#ccc' },
+  publishButtonText: { color: 'white', fontWeight: 'bold' },
+  previewContainer: { position: 'relative', marginTop: 10 },
+  imagePreview: { width: '100%', height: 150, borderRadius: 10 },
+  removeImage: { position: 'absolute', top: 5, right: 5, backgroundColor: 'white', borderRadius: 12 },
+  card: { backgroundColor: 'white', padding: 15, marginBottom: 8, elevation: 1 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
   userInfo: { flexDirection: 'row', alignItems: 'center' },
-  username: { fontWeight: 'bold', color: '#333' },
+  avatarPlaceholder: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  avatarLetter: { color: 'white', fontWeight: 'bold' },
+  username: { fontWeight: 'bold', fontSize: 15 },
   date: { color: 'gray', fontSize: 12 },
-  content: { fontSize: 15, marginVertical: 5 },
-  actions: { marginTop: 10 },
-  row: { flexDirection: 'row', alignItems: 'center' },
-  actionText: { marginLeft: 5, color: '#666' },
-  followButton: {
-    marginLeft: 10,
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 15,
-  },
-  followingButton: {
-    backgroundColor: '#EFEFEF',
-    borderWidth: 1,
-    borderColor: '#CCC'
-  },
-  followText: { color: 'white', fontSize: 12, fontWeight: '700' },
-  followingText: { color: '#333' }
+  followTextButton: { padding: 5 },
+  followLinkText: { color: '#007AFF', fontWeight: 'bold' },
+  followingBadge: { backgroundColor: '#eee', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 5 },
+  followingBadgeText: { color: '#666', fontSize: 12 },
+  content: { fontSize: 16, color: '#222', marginBottom: 10, lineHeight: 22 },
+  postImage: { width: '100%', height: 250, borderRadius: 8, marginVertical: 10 },
+  divider: { height: 1, backgroundColor: '#eee', marginVertical: 10 },
+  actions: { flexDirection: 'row', justifyContent: 'space-around' },
+  actionItem: { flexDirection: 'row', alignItems: 'center' },
+  actionText: { marginLeft: 8, color: '#666', fontWeight: '500' },
+  commentPreviewArea: { backgroundColor: '#f8f9fa', padding: 10, borderRadius: 8, marginTop: 10 },
+  previewCommentText: { fontSize: 13, color: '#444', marginBottom: 3 },
+  previewCommentUser: { fontWeight: 'bold', color: '#222' },
+  viewMoreText: { color: '#007AFF', fontSize: 12, marginTop: 5, fontWeight: '500' },
 });
