@@ -13,7 +13,11 @@ import OnboardingScreen from './src/screens/OnboardingScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import DiscoveryMap from './src/screens/DiscoveryMap';
 import SocialFeed from './src/screens/SocialFeed';
-import ProfileScreen from './src/screens/ProfileScreen'; // <--- NEW
+import ProfileScreen from './src/screens/ProfileScreen';
+import UserListScreen from './src/screens/UserListScreen';
+import PostDetail from './src/screens/PostDetail';
+import UserProfileScreen from './src/screens/UserProfileScreen';
+import NotificationsScreen from './src/screens/NotificationsScreen';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -45,7 +49,6 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [initialRoute, setInitialRoute] = useState('Login');
 
-  // CHECK LOGIN STATUS ON STARTUP
   useEffect(() => {
     checkLogin();
   }, []);
@@ -53,7 +56,7 @@ export default function App() {
   const checkLogin = async () => {
     const token = await AsyncStorage.getItem('userToken');
     if (token) {
-      setInitialRoute('Home'); // Skip login if token exists
+      setInitialRoute('Home'); 
     }
     setLoading(false);
   };
@@ -67,6 +70,36 @@ export default function App() {
         <Stack.Screen name="Register" component={RegisterScreen} options={{ title: 'Create Account' }} />
         <Stack.Screen name="Onboarding" component={OnboardingScreen} />
         <Stack.Screen name="Home" component={MainAppTabs} options={{ headerShown: false }} />
+        
+        <Stack.Screen 
+          name="UserList" 
+          component={UserListScreen} 
+          options={({ route }) => ({ 
+            title: route.params?.type || 'Users',
+            headerShown: true 
+          })} 
+        />
+
+        {/* 2. ADD POST DETAIL SCREEN HERE */}
+        <Stack.Screen 
+          name="PostDetail" 
+          component={PostDetail} 
+          options={{ 
+            title: 'Post', 
+            headerShown: true // Allow user to go back to the feed
+          }} 
+        />
+        <Stack.Screen 
+          name="Notifications" 
+          component={NotificationsScreen} 
+          options={{ 
+            title: 'Notifications',
+            headerShown: true, // You want a back button here
+            headerTintColor: '#007AFF',
+            headerTitleStyle: { fontWeight: 'bold', color: '#333' }
+          }} 
+        />
+        <Stack.Screen name="UserProfile" component={UserProfileScreen} options={{ headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

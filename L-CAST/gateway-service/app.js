@@ -4,15 +4,21 @@ const axios = require('axios');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const helmet = require('helmet');
+const cors = require('cors');
 const { Pool } = require('pg');
 
-const app = express();
-app.use(helmet());
-app.use(express.json());
-app.use('/api/pois', poiRoutes);
-const cors = require('cors');
-app.use(cors()); // Place this at the top of your app.js
+// 1. IMPORT ROUTES
+const socialRoutes = require('./routes/socialRoutes');
+// const poiRoutes = require('./routes/poiRoutes'); // Uncomment this if you have a poiRoutes file
 
+const app = express();
+
+// 2. MIDDLEWARE
+app.use(helmet());
+app.use(cors());
+app.use(express.json());
+
+// 3. DATABASE CONFIG
 const pool = new Pool({
   user: process.env.POSTGRES_USER,
   host: 'database',
@@ -21,11 +27,10 @@ const pool = new Pool({
   port: 5432,
 });
 
-// --- CLO3: Security Standard (Authentication) ---
+// 4. AUTH ROUTES (Register/Login)
 app.post('/auth/register', async (req, res) => {
   const { username, email, password, interests } = req.body;
   const hashedPassword = await bcrypt.hash(password, 12);
-  
   try {
     const result = await pool.query(
       'INSERT INTO users (username, email, password_hash, interest_vector) VALUES ($1, $2, $3, $4) RETURNING id',
@@ -39,141 +44,53 @@ app.post('/auth/register', async (req, res) => {
 
 app.post('/auth/login', async (req, res) => {
   const { email, password } = req.body;
-  const user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-  
-  if (user.rows.length > 0 && await bcrypt.compare(password, user.rows[0].password_hash)) {
-    const token = jwt.sign({ id: user.rows[0].id }, process.env.JWT_SECRET, { expiresIn: '1h' });
-    res.json({ token });
-  } else {
-    res.status(401).json({ error: 'Invalid Credentials' });
-  }
+  try {
+    const user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (user.rows.length > 0 && await bcrypt.compare(password, user.rows[0].password_hash)) {
+      const token = jwt.sign({ id: user.rows[0].id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      res.json({ token });
+    } else {
+      res.status(401).json({ error: 'Invalid Credentials' });
+    }
+  } catch (err) { res.status(500).json({ error: "Login failed" }); }
 });
 
-// --- The Master Pipeline (Stage 1: Retrieval) ---
-app.get('/api/discover', async (req, res) => {
-  const { lat, lon, radius = 20000 } = req.query; // Default 20km
+// 5. ATTACH SOCIAL ROUTES
+// We put this after pool is defined so the routes can use the pool
+app.use('/api/social', socialRoutes);
 
+// 6. DISCOVER ROUTE (Consolidated & Improved)
+app.get('/api/discover', async (req, res) => {
+  const { lat, lon, radius = 20000 } = req.query;
   try {
-    // Stage 1: Geospatial Fetch using PostGIS (High Rigor)
+    // Stage 1: PostGIS Retrieval
     const poiQuery = await pool.query(`
       SELECT id, name, description, region, 
              ST_X(location::geometry) as lon, ST_Y(location::geometry) as lat
       FROM pois
       WHERE ST_DWithin(location, ST_MakePoint($1, $2)::geography, $3)
-    `, [lon, lat, radius]);
+    `, [lon || 35.5, lat || 33.8, radius]);
 
     const candidates = poiQuery.rows;
 
-    // Stage 2 & 3: Forward to Python Inference Service (Brain)
-    const inferenceResponse = await axios.post('http://inference-service:8000/v1/recommend', {
-      user_prefs: "I enjoy historical sites and coastal views", // Mock for now, would pull from user profile
-      poi_candidates: candidates
-    }, {
-      headers: { 'X-Internal-Key': process.env.INTERNAL_SERVICE_KEY }
-    });
-
-    res.json(inferenceResponse.data);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Circuit Breaker: Pipeline Failure', details: err.message });
-  }
-});
-
-app.listen(3000, () => console.log('L-CAST Secure Gateway Online'));
-
-// Endpoint for users to "Verify" safety at a location
-app.post('/api/check-in', async (req, res) => {
-  const { poiId } = req.body;
-  const client = await pool.connect();
-  
-  try {
-    await client.query('BEGIN');
-    
-    // 1. Log the visit
-    await client.query('INSERT INTO visits (user_id, poi_id) VALUES ($1, $2)', [req.user.id, poiId]);
-
-    // 2. BOOST LONG TAIL: Increment base popularity by 0.05
-    // This allows underserved regions to gain "algorithmic weight"
-    await client.query('UPDATE pois SET base_popularity_score = base_popularity_score + 0.05 WHERE id = $1', [poiId]);
-
-    await client.query('COMMIT');
-    res.json({ success: true, message: "Community visibility updated!" });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    res.status(500).send("Error updating visibility");
-  } finally {
-    client.release();
-  }
-});
-
-// Post a "Review/Update" for a POI
-app.post('/api/posts', async (req, res) => {
-  const { poi_id, content, rating } = req.body;
-  try {
-    const result = await pool.query(
-      'INSERT INTO posts (user_id, poi_id, content, rating) VALUES ($1, $2, $3, $4) RETURNING *',
-      [req.user.id, poi_id, content, rating]
-    );
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: "Post failed" });
-  }
-});
-
-// Get Social Feed for a specific POI
-app.get('/api/pois/:id/feed', async (req, res) => {
-  const result = await pool.query(
-    'SELECT posts.*, users.username FROM posts JOIN users ON posts.user_id = users.id WHERE poi_id = $1 ORDER BY created_at DESC',
-    [req.params.id]
-  );
-  res.json(result.rows);
-});
-
-// Get my Itinerary
-app.get('/api/itinerary', async (req, res) => {
-  const result = await pool.query(
-    'SELECT i.visit_date, p.name, p.region FROM itineraries i JOIN pois p ON i.poi_id = p.id WHERE i.user_id = $1 ORDER BY i.visit_date ASC',
-    [req.user.id]
-  );
-  res.json(result.rows);
-});
-
-app.get('/api/discover', async (req, res) => {
-  try {
-    // 1. Fetch from Postgres (Always works)
-    const poiQuery = await pool.query('SELECT ... FROM pois LIMIT 20');
-    const candidates = poiQuery.rows;
-
-    // 2. Try the Python Inference Service (The Circuit Breaker Pattern)
+    // Stage 2: AI Ranking (Circuit Breaker Pattern)
     try {
-        const response = await axios.post('http://inference-service:8000/v1/recommend', 
-            { user_prefs: req.user.prefs, poi_candidates: candidates },
-            { timeout: 2000, headers: { 'X-Internal-Key': process.env.INTERNAL_SERVICE_KEY } }
-        );
-        return res.json(response.data);
-    } catch (mlError) {
-        // FALLBACK: If Brain is dead, return raw list (Graceful Degradation)
-        console.warn("Inference Service Down - Using Fallback Logic");
-        return res.json({ 
-            status: "fallback", 
-            data: candidates, 
-            message: "Safety rankings temporarily offline. Showing all sites." 
+        const inferenceResponse = await axios.post('http://inference-service:8000/v1/recommend', {
+          user_prefs: "I enjoy historical sites", 
+          poi_candidates: candidates
+        }, {
+          headers: { 'X-Internal-Key': process.env.INTERNAL_SERVICE_KEY },
+          timeout: 2000
         });
+        res.json(inferenceResponse.data);
+    } catch (mlError) {
+        console.warn("Inference Service Down - Using Fallback");
+        res.json({ status: "fallback", data: candidates });
     }
   } catch (err) {
-    res.status(500).json({ error: "System Critical Failure" });
+    res.status(500).json({ error: 'Pipeline Failure', details: err.message });
   }
 });
 
-// Save a POI to my Itinerary
-app.post('/api/itinerary', async (req, res) => {
-  const { poi_id, date } = req.body;
-  try {
-    await pool.query('INSERT INTO itineraries (user_id, poi_id, visit_date) VALUES ($1, $2, $3)', 
-      [req.user.id, poi_id, date]);
-    res.json({ message: "Added to your Lebanon itinerary!" });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to save itinerary" });
-  }
-});
-
+// 7. START SERVER
+app.listen(3000, () => console.log('L-CAST Secure Gateway Online'));
