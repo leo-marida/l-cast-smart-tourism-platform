@@ -16,6 +16,9 @@ export default function SocialFeed() {
   const [followingIds, setFollowingIds] = useState([]); 
   const [currentUserId, setCurrentUserId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Edit State
+  const [editingPostId, setEditingPostId] = useState(null);
 
   const navigation = useNavigation();
   const BASE_URL = api.defaults.baseURL;
@@ -32,7 +35,6 @@ export default function SocialFeed() {
       listener: (event) => {
         const currentY = event.nativeEvent.contentOffset.y;
         const diff = currentY - lastScrollY.current;
-
         if (currentY <= 0) {
           Animated.spring(headerTranslate, { toValue: 0, useNativeDriver: true }).start();
         } else if (diff > 5) {
@@ -48,7 +50,6 @@ export default function SocialFeed() {
   const fetchPosts = async () => {
     try {
       const res = await api.get('/api/social/feed');
-      // Ensure we treat the comment_count as a number right away
       setPosts(res.data.map(p => ({ 
         ...p, 
         isLiked: p.is_liked || false,
@@ -72,8 +73,6 @@ export default function SocialFeed() {
     } catch (err) { console.log(err); }
   };
 
-  // --- REFRESH ON FOCUS ---
-  // This triggers when returning from PostDetail to update comment counts
   useFocusEffect(
     useCallback(() => {
       fetchPosts();
@@ -84,18 +83,16 @@ export default function SocialFeed() {
     fetchMyProfile();
   }, []);
 
-  // --- NAVIGATION LOGIC ---
   const navigateToProfile = (targetUserId) => {
     if (targetUserId === currentUserId) {
-      // If the post belongs to me, go to the main Profile tab
       navigation.navigate('Profile'); 
     } else {
-      // If it belongs to someone else, go to the new UserProfile screen
       navigation.navigate('UserProfile', { userId: targetUserId });
     }
   };
 
   const pickImage = async () => {
+    if (editingPostId) return; // Disable image change during edit for simplicity
     let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
@@ -108,17 +105,60 @@ export default function SocialFeed() {
   const handlePost = async () => {
     if (!newPost && !selectedImage) return;
     try {
-      const formData = new FormData();
-      formData.append('content', newPost);
-      if (selectedImage) {
-        const filename = selectedImage.split('/').pop();
-        const match = /\.(\w+)$/.exec(filename);
-        const type = match ? `image/${match[1]}` : `image`;
-        formData.append('image', { uri: selectedImage, name: filename, type });
+      if (editingPostId) {
+        // Handle UPDATE
+        await api.put(`/api/social/post/${editingPostId}`, { content: newPost });
+        setEditingPostId(null);
+      } else {
+        // Handle CREATE
+        const formData = new FormData();
+        formData.append('content', newPost);
+        if (selectedImage) {
+          const filename = selectedImage.split('/').pop();
+          const match = /\.(\w+)$/.exec(filename);
+          const type = match ? `image/${match[1]}` : `image`;
+          formData.append('image', { uri: selectedImage, name: filename, type });
+        }
+        await api.post('/api/social/post', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       }
-      await api.post('/api/social/post', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-      setNewPost(''); setSelectedImage(null); fetchPosts(); 
-    } catch(err) { Alert.alert("Error", "Could not upload post."); }
+      setNewPost(''); 
+      setSelectedImage(null); 
+      fetchPosts(); 
+    } catch(err) { 
+      Alert.alert("Error", "Could not process request."); 
+    }
+  };
+
+  const handlePostOptions = (post) => {
+    Alert.alert(
+      "Post Options",
+      "What would you like to do?",
+      [
+        { 
+          text: "Edit", 
+          onPress: () => {
+            setEditingPostId(post.id);
+            setNewPost(post.content);
+            // Optional: scroll to top so user sees the edit input
+          } 
+        },
+        { 
+          text: "Delete", 
+          style: "destructive", 
+          onPress: () => confirmDelete(post.id) 
+        },
+        { text: "Cancel", style: "cancel" }
+      ]
+    );
+  };
+
+  const confirmDelete = async (postId) => {
+    try {
+      await api.delete(`/api/social/post/${postId}`);
+      setPosts(curr => curr.filter(p => p.id !== postId));
+    } catch (err) {
+      Alert.alert("Error", "Could not delete post.");
+    }
   };
 
   const handleFollow = async (userId) => {
@@ -146,28 +186,31 @@ export default function SocialFeed() {
       <SafeAreaView edges={['top']} style={{ backgroundColor: 'white', zIndex: 11 }} />
       
       <Animated.View style={[styles.headerContainer, { transform: [{ translateY: headerTranslate }] }]}>
-        {/* HEADER TOP ROW */}
         <View style={styles.headerTopRow}>
             <Text style={styles.headerTitle}>Community Pulse</Text>
-            <TouchableOpacity 
-                style={styles.notificationBtn} 
-                onPress={() => navigation.navigate('Notifications')}
-            >
+            <TouchableOpacity style={styles.notificationBtn} onPress={() => navigation.navigate('Notifications')}>
                 <Ionicons name="notifications-outline" size={26} color="#333" />
-                {/* Red dot for unread status */}
                 <View style={styles.unreadBadge} />
             </TouchableOpacity>
         </View>
 
         <View style={styles.createPostContainer}>
+          {editingPostId && (
+            <View style={styles.editLabelRow}>
+              <Text style={styles.editLabel}>Editing Post...</Text>
+              <TouchableOpacity onPress={() => { setEditingPostId(null); setNewPost(''); }}>
+                <Text style={styles.cancelEdit}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          )}
           <TextInput 
             style={styles.postInput} 
-            placeholder="What's happening?" 
+            placeholder={editingPostId ? "Edit your post..." : "What's happening?"} 
             multiline 
             value={newPost} 
             onChangeText={setNewPost} 
           />
-          {selectedImage && (
+          {selectedImage && !editingPostId && (
             <View style={styles.previewContainer}>
               <Image source={{ uri: selectedImage }} style={styles.imagePreview} />
               <TouchableOpacity style={styles.removeImage} onPress={() => setSelectedImage(null)}>
@@ -176,12 +219,18 @@ export default function SocialFeed() {
             </View>
           )}
           <View style={styles.createPostActions}>
-            <TouchableOpacity onPress={pickImage} style={styles.iconButton}>
-              <Ionicons name="image-outline" size={24} color="#007AFF" />
-              <Text style={styles.iconText}>Photo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handlePost} style={[styles.publishButton, (!newPost && !selectedImage) && styles.disabledButton]}>
-              <Text style={styles.publishButtonText}>Post</Text>
+            {!editingPostId ? (
+              <TouchableOpacity onPress={pickImage} style={styles.iconButton}>
+                <Ionicons name="image-outline" size={24} color="#007AFF" />
+                <Text style={styles.iconText}>Photo</Text>
+              </TouchableOpacity>
+            ) : <View />}
+            
+            <TouchableOpacity 
+              onPress={handlePost} 
+              style={[styles.publishButton, (!newPost && !selectedImage) && styles.disabledButton]}
+            >
+              <Text style={styles.publishButtonText}>{editingPostId ? "Update" : "Post"}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -189,7 +238,7 @@ export default function SocialFeed() {
 
       <Animated.FlatList
         data={posts}
-        contentContainerStyle={{ paddingTop: 220, paddingBottom: 100 }} // Increased padding for the larger header
+        contentContainerStyle={{ paddingTop: 220, paddingBottom: 100 }}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         refreshControl={
@@ -205,7 +254,7 @@ export default function SocialFeed() {
               <View style={styles.header}>
                 <TouchableOpacity 
                     style={styles.userInfo} 
-                    onPress={() => navigation.navigate('UserProfile', { userId: item.user_id })}
+                    onPress={() => navigateToProfile(item.user_id)}
                 >
                   <View style={styles.avatarPlaceholder}>
                      <Text style={styles.avatarLetter}>{item.username ? item.username[0].toUpperCase() : '?'}</Text>
@@ -216,7 +265,11 @@ export default function SocialFeed() {
                   </View>
                 </TouchableOpacity>
 
-                {!isMe && currentUserId && (
+                {isMe ? (
+                  <TouchableOpacity onPress={() => handlePostOptions(item)} style={styles.optionsBtn}>
+                    <Ionicons name="ellipsis-horizontal" size={22} color="#666" />
+                  </TouchableOpacity>
+                ) : currentUserId && (
                   <TouchableOpacity onPress={() => handleFollow(item.user_id)} style={isFollowing ? styles.followingBadge : styles.followTextButton}>
                     <Text style={isFollowing ? styles.followingBadgeText : styles.followLinkText}>
                       {isFollowing ? "Following" : "+ Follow"}
@@ -281,29 +334,16 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     paddingRight: 20,
   },
-  notificationBtn: {
-    padding: 5,
-    position: 'relative',
-  },
+  notificationBtn: { padding: 5, position: 'relative' },
   unreadBadge: {
-    position: 'absolute',
-    top: 5,
-    right: 5,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#ff3b30',
-    borderWidth: 1.5,
-    borderColor: 'white',
+    position: 'absolute', top: 5, right: 5, width: 10, height: 10,
+    borderRadius: 5, backgroundColor: '#ff3b30', borderWidth: 1.5, borderColor: 'white',
   },
-  headerTitle: { 
-    fontSize: 24, 
-    fontWeight:'bold', 
-    padding: 15, 
-    backgroundColor: 'white', 
-    flex: 1 
-  },
+  headerTitle: { fontSize: 24, fontWeight:'bold', padding: 15, backgroundColor: 'white', flex: 1 },
   createPostContainer: { backgroundColor: 'white', padding: 15, marginBottom: 10, borderBottomWidth: 1, borderBottomColor: '#ddd' },
+  editLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
+  editLabel: { color: '#007AFF', fontWeight: 'bold', fontSize: 12 },
+  cancelEdit: { color: 'red', fontSize: 12 },
   postInput: { fontSize: 16, minHeight: 60, textAlignVertical: 'top' },
   createPostActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 10 },
   iconButton: { flexDirection: 'row', alignItems: 'center' },
@@ -317,6 +357,7 @@ const styles = StyleSheet.create({
   card: { backgroundColor: 'white', padding: 15, marginBottom: 8, elevation: 1 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
   userInfo: { flexDirection: 'row', alignItems: 'center' },
+  optionsBtn: { padding: 5 },
   avatarPlaceholder: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   avatarLetter: { color: 'white', fontWeight: 'bold' },
   username: { fontWeight: 'bold', fontSize: 15 },

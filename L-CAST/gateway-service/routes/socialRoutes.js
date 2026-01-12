@@ -361,4 +361,43 @@ router.get('/post/:id/comments', auth, async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// --- DELETE POST ---
+router.delete('/post/:id', auth, async (req, res) => {
+    try {
+        const postId = req.params.id;
+        const userId = req.user.id;
+
+        // Check ownership
+        const post = await pool.query('SELECT user_id FROM posts WHERE id = $1', [postId]);
+        
+        if (post.rows.length === 0) return res.status(404).json({ error: "Post not found" });
+        if (post.rows[0].user_id !== userId) return res.status(403).json({ error: "Unauthorized" });
+
+        await pool.query('DELETE FROM posts WHERE id = $1', [postId]);
+        res.json({ success: true, message: "Post deleted" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- EDIT POST ---
+router.put('/post/:id', auth, async (req, res) => {
+    const { content } = req.body;
+    try {
+        const postId = req.params.id;
+        const userId = req.user.id;
+
+        const post = await pool.query('SELECT user_id FROM posts WHERE id = $1', [postId]);
+        if (post.rows[0].user_id !== userId) return res.status(403).json({ error: "Unauthorized" });
+
+        const updated = await pool.query(
+            'UPDATE posts SET content = $1 WHERE id = $2 RETURNING *',
+            [content, postId]
+        );
+        res.json(updated.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;
