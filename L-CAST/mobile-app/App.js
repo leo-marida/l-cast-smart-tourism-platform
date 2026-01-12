@@ -15,7 +15,9 @@ import DiscoveryMap from './src/screens/DiscoveryMap';
 import SocialFeed from './src/screens/SocialFeed';
 import ProfileScreen from './src/screens/ProfileScreen';
 import UserListScreen from './src/screens/UserListScreen';
-import PostDetail from './src/screens/PostDetail'; // 1. IMPORT POST DETAIL
+import PostDetail from './src/screens/PostDetail';
+import UserProfileScreen from './src/screens/UserProfileScreen';
+import NotificationsScreen from './src/screens/NotificationsScreen';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -87,6 +89,17 @@ export default function App() {
             headerShown: true // Allow user to go back to the feed
           }} 
         />
+        <Stack.Screen 
+          name="Notifications" 
+          component={NotificationsScreen} 
+          options={{ 
+            title: 'Notifications',
+            headerShown: true, // You want a back button here
+            headerTintColor: '#007AFF',
+            headerTitleStyle: { fontWeight: 'bold', color: '#333' }
+          }} 
+        />
+        <Stack.Screen name="UserProfile" component={UserProfileScreen} options={{ headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

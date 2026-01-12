@@ -1,5 +1,8 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, RefreshControl, ScrollView, Alert, Image } from 'react-native';
+import { 
+  View, Text, StyleSheet, TouchableOpacity, RefreshControl, 
+  ScrollView, Alert, Image, Modal, TextInput, ActivityIndicator 
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
@@ -8,11 +11,17 @@ import api from '../services/api';
 
 export default function ProfileScreen({ navigation }) {
   const [username, setUsername] = useState('User');
+  const [bio, setBio] = useState('Adventure awaits. Sharing my favorite spots! ✨');
   const [myPosts, setMyPosts] = useState([]);
   const [savedPlaces, setSavedPlaces] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [isSavingBio, setIsSavingBio] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [activeTab, setActiveTab] = useState('posts'); 
+
+  // Edit Bio States
+  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+  const [tempBio, setTempBio] = useState('');
 
   const [currentUserId, setCurrentUserId] = useState(null);
   const [stats, setStats] = useState({ followers: 0, following: 0 });
@@ -28,24 +37,32 @@ export default function ProfileScreen({ navigation }) {
   const loadProfile = async () => {
     setRefreshing(true);
     try {
+      // 1. Fetch own profile data (now includes bio from DB)
       const meRes = await api.get('/api/social/user/me/profile');
       const myId = meRes.data.id;
       setCurrentUserId(myId);
       setUsername(meRes.data.username);
+      
+      // If bio exists in DB, use it; otherwise use default
+      if (meRes.data.bio) {
+        setBio(meRes.data.bio);
+      }
 
+      // 2. Fetch stats (followers/following)
       const profileRes = await api.get(`/api/social/user/${myId}/profile`);
       setStats({
         followers: profileRes.data.followersCount || 0,
         following: profileRes.data.followingCount || 0
       });
 
+      // 3. Fetch feed and filter for user's posts
       const feedRes = await api.get('/api/social/feed');
-      // Filter posts and format them exactly like the Community Feed
       const filteredPosts = feedRes.data
         .filter(p => p.user_id === myId)
         .map(p => ({ ...p, isLiked: p.is_liked || false }));
       setMyPosts(filteredPosts);
 
+      // 4. Fetch saved places
       const savedRes = await api.get('/api/pois/saved');
       setSavedPlaces(savedRes.data);
 
@@ -56,11 +73,37 @@ export default function ProfileScreen({ navigation }) {
     }
   };
 
+  const handleUpdateBio = async () => {
+    if (!tempBio.trim()) {
+        Alert.alert("Error", "Bio cannot be empty.");
+        return;
+    }
+
+    setIsSavingBio(true);
+    try {
+      // Sends PATCH request to socialRoutes.js
+      await api.patch('/api/social/me/update', { bio: tempBio });
+      
+      setBio(tempBio);
+      setIsEditModalVisible(false);
+      Alert.alert("Success", "Profile bio updated!");
+    } catch (err) {
+      console.error("Update Bio Error:", err);
+      Alert.alert("Error", "Could not save bio to database. Please try again.");
+    } finally {
+      setIsSavingBio(false);
+    }
+  };
+
   const handleLike = async (postId) => {
     setMyPosts(curr => curr.map(p => {
       if (p.id === postId) {
         const newState = !p.isLiked;
-        return { ...p, isLiked: newState, likes_count: newState ? (p.likes_count || 0) + 1 : (p.likes_count || 1) - 1 };
+        return { 
+            ...p, 
+            isLiked: newState, 
+            likes_count: newState ? (p.likes_count || 0) + 1 : Math.max(0, (p.likes_count || 1) - 1) 
+        };
       }
       return p;
     }));
@@ -105,7 +148,7 @@ export default function ProfileScreen({ navigation }) {
 
       <ScrollView 
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadProfile} />}
-        stickyHeaderIndices={[2]} // This makes the Tabs stick to the top when scrolling
+        stickyHeaderIndices={[2]} 
       >
         {/* 0: PROFILE HEADER */}
         <View style={styles.profileHeader}>
@@ -124,10 +167,18 @@ export default function ProfileScreen({ navigation }) {
           </View>
         </View>
 
-        {/* 1: BIO */}
+        {/* 1: BIO SECTION WITH EDIT */}
         <View style={styles.bioSection}>
-            <Text style={styles.bioUsername}>@{username}</Text>
-            <Text style={styles.bioText}>Adventure awaits. Sharing my favorite spots! ✨</Text>
+            <View style={styles.bioHeader}>
+                <Text style={styles.bioUsername}>@{username}</Text>
+                <TouchableOpacity 
+                    style={styles.editBtn} 
+                    onPress={() => { setTempBio(bio); setIsEditModalVisible(true); }}
+                >
+                    <Text style={styles.editBtnText}>Edit Bio</Text>
+                </TouchableOpacity>
+            </View>
+            <Text style={styles.bioText}>{bio}</Text>
         </View>
 
         {/* 2: TAB SWITCHER */}
@@ -136,14 +187,14 @@ export default function ProfileScreen({ navigation }) {
                 style={[styles.tabButton, activeTab === 'posts' && styles.activeTab]} 
                 onPress={() => setActiveTab('posts')}
             >
-                <Ionicons name="apps-outline" size={24} color={activeTab === 'posts' ? '#007AFF' : '#888'} />
+                <Ionicons name="apps-outline" size={22} color={activeTab === 'posts' ? '#007AFF' : '#888'} />
                 <Text style={[styles.tabLabel, activeTab === 'posts' && {color: '#007AFF'}]}>My Posts</Text>
             </TouchableOpacity>
             <TouchableOpacity 
                 style={[styles.tabButton, activeTab === 'saved' && styles.activeTab]} 
                 onPress={() => setActiveTab('saved')}
             >
-                <Ionicons name="bookmark-outline" size={24} color={activeTab === 'saved' ? '#007AFF' : '#888'} />
+                <Ionicons name="bookmark-outline" size={22} color={activeTab === 'saved' ? '#007AFF' : '#888'} />
                 <Text style={[styles.tabLabel, activeTab === 'saved' && {color: '#007AFF'}]}>Saved</Text>
             </TouchableOpacity>
         </View>
@@ -157,7 +208,7 @@ export default function ProfileScreen({ navigation }) {
                     myPosts.map(item => (
                         <View key={item.id} style={styles.feedCard}>
                             <View style={styles.feedCardHeader}>
-                                <View style={styles.miniAvatar}><Text style={styles.miniAvatarText}>{username[0]}</Text></View>
+                                <View style={styles.miniAvatar}><Text style={styles.miniAvatarText}>{username[0].toUpperCase()}</Text></View>
                                 <View>
                                     <Text style={styles.cardUser}>@{username}</Text>
                                     <Text style={styles.cardDate}>{new Date(item.created_at).toLocaleDateString()}</Text>
@@ -206,6 +257,44 @@ export default function ProfileScreen({ navigation }) {
             )}
         </View>
       </ScrollView>
+
+      {/* EDIT BIO MODAL */}
+      <Modal visible={isEditModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Update Bio</Text>
+                <TextInput 
+                    style={styles.bioInput}
+                    multiline
+                    numberOfLines={4}
+                    value={tempBio}
+                    onChangeText={setTempBio}
+                    placeholder="Tell the community about yourself..."
+                    maxLength={150}
+                />
+                <View style={styles.modalButtons}>
+                    <TouchableOpacity 
+                        onPress={() => setIsEditModalVisible(false)} 
+                        style={styles.cancelBtn}
+                        disabled={isSavingBio}
+                    >
+                        <Text style={styles.cancelBtnText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                        onPress={handleUpdateBio} 
+                        style={styles.saveBtn}
+                        disabled={isSavingBio}
+                    >
+                        {isSavingBio ? (
+                            <ActivityIndicator color="white" />
+                        ) : (
+                            <Text style={styles.saveBtnText}>Save</Text>
+                        )}
+                    </TouchableOpacity>
+                </View>
+            </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -229,18 +318,20 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 13, color: '#666' },
 
   bioSection: { paddingHorizontal: 20, paddingBottom: 20, backgroundColor: '#fff' },
+  bioHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
   bioUsername: { fontWeight: 'bold', fontSize: 16 },
-  bioText: { color: '#444', marginTop: 4 },
+  bioText: { color: '#444', fontSize: 14, lineHeight: 20 },
+  editBtn: { backgroundColor: '#f0f0f0', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 15, borderWidth: 1, borderColor: '#ddd' },
+  editBtnText: { fontSize: 12, fontWeight: '600', color: '#555' },
 
   tabContainer: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee', borderBottomWidth: 1, borderBottomColor: '#eee' },
   tabButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
   activeTab: { borderBottomWidth: 2, borderBottomColor: '#007AFF' },
-  tabLabel: { marginLeft: 8, fontWeight: '600', color: '#888' },
+  tabLabel: { marginLeft: 8, fontWeight: '600', color: '#888', fontSize: 14 },
 
   contentList: { paddingVertical: 10 },
   emptyText: { textAlign: 'center', color: '#888', marginTop: 40, fontStyle: 'italic' },
 
-  // FULL FEED CARD STYLES
   feedCard: { backgroundColor: '#fff', marginBottom: 10, padding: 15 },
   feedCardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   miniAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
@@ -253,11 +344,20 @@ const styles = StyleSheet.create({
   actionBtn: { flexDirection: 'row', alignItems: 'center', marginRight: 25 },
   actionCount: { marginLeft: 6, color: '#666', fontWeight: '500' },
 
-  // SAVED CARD STYLES
   savedCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', padding: 15, marginBottom: 1, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
   savedInfo: { flexDirection: 'row', alignItems: 'center' },
   locationIcon: { backgroundColor: '#007AFF', padding: 8, borderRadius: 20 },
   savedName: { fontWeight: 'bold', fontSize: 16 },
   savedRegion: { color: '#777', fontSize: 12 },
-  unsaveBtn: { padding: 5 }
+  unsaveBtn: { padding: 5 },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  modalContent: { backgroundColor: '#fff', width: '85%', borderRadius: 20, padding: 20, elevation: 10 },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' },
+  bioInput: { backgroundColor: '#f9f9f9', borderRadius: 10, padding: 12, textAlignVertical: 'top', height: 100, borderWidth: 1, borderColor: '#eee' },
+  modalButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 20 },
+  cancelBtn: { flex: 1, padding: 12, alignItems: 'center' },
+  cancelBtnText: { color: '#888', fontWeight: '600' },
+  saveBtn: { flex: 1, backgroundColor: '#007AFF', padding: 12, borderRadius: 10, alignItems: 'center', minHeight: 45, justifyContent: 'center' },
+  saveBtnText: { color: '#fff', fontWeight: 'bold' }
 });

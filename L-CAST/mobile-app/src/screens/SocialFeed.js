@@ -84,6 +84,17 @@ export default function SocialFeed() {
     fetchMyProfile();
   }, []);
 
+  // --- NAVIGATION LOGIC ---
+  const navigateToProfile = (targetUserId) => {
+    if (targetUserId === currentUserId) {
+      // If the post belongs to me, go to the main Profile tab
+      navigation.navigate('Profile'); 
+    } else {
+      // If it belongs to someone else, go to the new UserProfile screen
+      navigation.navigate('UserProfile', { userId: targetUserId });
+    }
+  };
+
   const pickImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -135,7 +146,19 @@ export default function SocialFeed() {
       <SafeAreaView edges={['top']} style={{ backgroundColor: 'white', zIndex: 11 }} />
       
       <Animated.View style={[styles.headerContainer, { transform: [{ translateY: headerTranslate }] }]}>
-        <Text style={styles.headerTitle}>Community Pulse</Text>
+        {/* HEADER TOP ROW */}
+        <View style={styles.headerTopRow}>
+            <Text style={styles.headerTitle}>Community Pulse</Text>
+            <TouchableOpacity 
+                style={styles.notificationBtn} 
+                onPress={() => navigation.navigate('Notifications')}
+            >
+                <Ionicons name="notifications-outline" size={26} color="#333" />
+                {/* Red dot for unread status */}
+                <View style={styles.unreadBadge} />
+            </TouchableOpacity>
+        </View>
+
         <View style={styles.createPostContainer}>
           <TextInput 
             style={styles.postInput} 
@@ -166,11 +189,11 @@ export default function SocialFeed() {
 
       <Animated.FlatList
         data={posts}
-        contentContainerStyle={{ paddingTop: 210, paddingBottom: 100 }}
+        contentContainerStyle={{ paddingTop: 220, paddingBottom: 100 }} // Increased padding for the larger header
         onScroll={handleScroll}
         scrollEventThrottle={16}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} progressViewOffset={210} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} progressViewOffset={220} />
         }
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => {
@@ -180,7 +203,10 @@ export default function SocialFeed() {
           return (
             <View style={styles.card}>
               <View style={styles.header}>
-                <View style={styles.userInfo}>
+                <TouchableOpacity 
+                    style={styles.userInfo} 
+                    onPress={() => navigation.navigate('UserProfile', { userId: item.user_id })}
+                >
                   <View style={styles.avatarPlaceholder}>
                      <Text style={styles.avatarLetter}>{item.username ? item.username[0].toUpperCase() : '?'}</Text>
                   </View>
@@ -188,7 +214,8 @@ export default function SocialFeed() {
                     <Text style={styles.username}>@{item.username}</Text>
                     <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString()}</Text>
                   </View>
-                </View>
+                </TouchableOpacity>
+
                 {!isMe && currentUserId && (
                   <TouchableOpacity onPress={() => handleFollow(item.user_id)} style={isFollowing ? styles.followingBadge : styles.followTextButton}>
                     <Text style={isFollowing ? styles.followingBadgeText : styles.followLinkText}>
@@ -247,7 +274,35 @@ const styles = StyleSheet.create({
     zIndex: 10,
     backgroundColor: '#f0f2f5',
   },
-  headerTitle: { fontSize: 24, fontWeight:'bold', padding: 15, backgroundColor: 'white' },
+  headerTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    paddingRight: 20,
+  },
+  notificationBtn: {
+    padding: 5,
+    position: 'relative',
+  },
+  unreadBadge: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#ff3b30',
+    borderWidth: 1.5,
+    borderColor: 'white',
+  },
+  headerTitle: { 
+    fontSize: 24, 
+    fontWeight:'bold', 
+    padding: 15, 
+    backgroundColor: 'white', 
+    flex: 1 
+  },
   createPostContainer: { backgroundColor: 'white', padding: 15, marginBottom: 10, borderBottomWidth: 1, borderBottomColor: '#ddd' },
   postInput: { fontSize: 16, minHeight: 60, textAlignVertical: 'top' },
   createPostActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 10 },
