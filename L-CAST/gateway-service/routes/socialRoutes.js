@@ -15,20 +15,100 @@ const pool = new Pool({
 
 // --- MULTER CONFIGURATION ---
 const uploadDir = 'uploads/';
-if (!fs.existsSync(uploadDir)){
-    fs.mkdirSync(uploadDir);
-}
+const storiesDir = 'uploads/stories/';
 
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, uploadDir);
-    },
-    filename: (req, file, cb) => {
-        cb(null, Date.now() + path.extname(file.originalname));
+// Ensure directories exist
+[uploadDir, storiesDir].forEach(dir => {
+    if (!fs.existsSync(dir)){
+        fs.mkdirSync(dir, { recursive: true });
     }
 });
 
-const upload = multer({ storage: storage });
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        // Check the route path instead of fieldname
+        const dest = req.path.includes('story') ? storiesDir : uploadDir;
+        cb(null, dest);
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, uniqueSuffix + path.extname(file.originalname));
+    }
+});
+
+const upload = multer({ 
+    storage: storage,
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+    fileFilter: (req, file, cb) => {
+        const allowedTypes = /jpeg|jpg|png|gif/;
+        const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+        const mimetype = allowedTypes.test(file.mimetype);
+        
+        if (mimetype && extname) {
+            return cb(null, true);
+        } else {
+            cb(new Error('Only image files are allowed!'));
+        }
+    }
+});
+
+// Get all stories from the last 24 hours
+router.get('/stories', auth, async (req, res) => {
+    try {
+        const query = `
+            SELECT s.id, s.image_url, s.created_at, u.username, u.id as user_id
+            FROM stories s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.created_at > NOW() - INTERVAL '24 hours'
+            ORDER BY u.id, s.created_at ASC
+        `;
+        const result = await pool.query(query);
+        
+        // Grouping stories by user_id
+        const grouped = result.rows.reduce((acc, story) => {
+            const found = acc.find(item => item.user_id === story.user_id);
+            if (found) {
+                found.stories.push(story);
+            } else {
+                acc.push({
+                    user_id: story.user_id,
+                    username: story.username,
+                    stories: [story]
+                });
+            }
+            return acc;
+        }, []);
+
+        res.json(grouped);
+    } catch (err) {
+        console.error('Stories fetch error:', err);
+        res.status(500).json({ error: "Failed to fetch stories" });
+    }
+});
+
+// Create a new story
+router.post('/story', auth, upload.single('image'), async (req, res) => {
+    try {
+        if (!req.file) {
+            console.error('No file received in request');
+            return res.status(400).json({ error: "No image provided" });
+        }
+        
+        const userId = req.user.id;
+        const imageUrl = `/uploads/stories/${req.file.filename}`;
+
+        console.log('Story uploaded:', { userId, imageUrl, filename: req.file.filename });
+
+        const result = await pool.query(
+            'INSERT INTO stories (user_id, image_url) VALUES ($1, $2) RETURNING *',
+            [userId, imageUrl]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error('Story creation error:', err);
+        res.status(500).json({ error: "Failed to post story" });
+    }
+});
 
 // --- FEED ROUTE ---
 router.get('/feed', auth, async (req, res) => {
@@ -68,6 +148,7 @@ router.get('/feed', auth, async (req, res) => {
 
         res.json(feedWithComments);
     } catch (err) {
+        console.error('Feed fetch error:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -78,6 +159,8 @@ router.post('/post', auth, upload.single('image'), async (req, res) => {
     const userId = req.user.id;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
 
+    console.log('Post creation:', { userId, imageUrl, content: content?.substring(0, 50) });
+
     try {
         const result = await pool.query(
             'INSERT INTO posts (user_id, poi_id, content, image_url) VALUES ($1, $2, $3, $4) RETURNING *',
@@ -85,21 +168,22 @@ router.post('/post', auth, upload.single('image'), async (req, res) => {
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
+        console.error('Post creation error:', err);
         res.status(500).json({ error: 'Failed to post' });
     }
 });
 
 // --- BIO / PROFILE UPDATES ---
-
-// FIX: Added 'bio' to the SELECT statement
 router.get('/user/me/profile', auth, async (req, res) => {
     try {
         const result = await pool.query('SELECT id, username, bio FROM users WHERE id = $1', [req.user.id]);
         res.json(result.rows[0]);
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) { 
+        console.error('Profile fetch error:', err);
+        res.status(500).json({ error: err.message }); 
+    }
 });
 
-// FIX: Used 'auth' middleware and added 'bio' to return data
 router.patch('/me/update', auth, async (req, res) => {
     const { bio } = req.body;
     const userId = req.user.id;
@@ -111,6 +195,7 @@ router.patch('/me/update', auth, async (req, res) => {
         );
         res.json({ success: true });
     } catch (err) {
+        console.error('Profile update error:', err);
         res.status(500).json({ error: "Server Error" });
     }
 });
@@ -118,7 +203,7 @@ router.patch('/me/update', auth, async (req, res) => {
 router.get('/user/:id/profile', auth, async (req, res) => {
     try {
         const targetUserId = req.params.id;
-        const myId = req.user.id; // The person logged in
+        const myId = req.user.id;
 
         const query = `
             SELECT 
@@ -144,14 +229,13 @@ router.get('/user/:id/profile', auth, async (req, res) => {
 
         const profile = result.rows[0];
         
-        // Ensure counts are numbers (PG returns counts as strings)
         res.json({
             ...profile,
             followersCount: parseInt(profile.followersCount),
             followingCount: parseInt(profile.followingCount)
         });
     } catch (err) {
-        console.error(err);
+        console.error('User profile fetch error:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -165,14 +249,16 @@ router.post('/user/:id/follow', auth, async (req, res) => {
     try {
         await pool.query('INSERT INTO follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [myId, targetUserId]);
         
-        // Create Notification
         await pool.query(
             'INSERT INTO notifications (recipient_id, sender_id, type) VALUES ($1, $2, $3)',
             [targetUserId, myId, 'follow']
         );
 
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) { 
+        console.error('Follow error:', err);
+        res.status(500).json({ error: err.message }); 
+    }
 });
 
 // --- LIKE WITH NOTIFICATION ---
@@ -189,7 +275,6 @@ router.post('/post/:id/like', auth, async (req, res) => {
             await pool.query('INSERT INTO post_likes (user_id, post_id) VALUES ($1, $2)', [userId, postId]);
             await pool.query('UPDATE posts SET likes_count = likes_count + 1 WHERE id=$1', [postId]);
 
-            // Create Notification
             const postInfo = await pool.query('SELECT user_id FROM posts WHERE id = $1', [postId]);
             const recipientId = postInfo.rows[0].user_id;
 
@@ -201,7 +286,10 @@ router.post('/post/:id/like', auth, async (req, res) => {
             }
         }
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) { 
+        console.error('Like error:', err);
+        res.status(500).json({ error: err.message }); 
+    }
 });
 
 // --- COMMENT WITH NOTIFICATION ---
@@ -215,7 +303,6 @@ router.post('/post/:id/comment', auth, async (req, res) => {
             [postId, userId, content]
         );
 
-        // Create Notification
         const postInfo = await pool.query('SELECT user_id FROM posts WHERE id = $1', [postId]);
         const recipientId = postInfo.rows[0].user_id;
 
@@ -227,14 +314,20 @@ router.post('/post/:id/comment', auth, async (req, res) => {
         }
 
         res.status(201).json(result.rows[0]);
-    } catch (err) { res.status(500).json({ error: "Failed to add comment" }); }
+    } catch (err) { 
+        console.error('Comment error:', err);
+        res.status(500).json({ error: "Failed to add comment" }); 
+    }
 });
 
 router.delete('/user/:id/unfollow', auth, async (req, res) => {
     try {
         await pool.query('DELETE FROM follows WHERE follower_id = $1 AND following_id = $2', [req.user.id, req.params.id]);
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: "Database error" }); }
+    } catch (err) { 
+        console.error('Unfollow error:', err);
+        res.status(500).json({ error: "Database error" }); 
+    }
 });
 
 router.get('/notifications', auth, async (req, res) => {
@@ -249,7 +342,10 @@ router.get('/notifications', auth, async (req, res) => {
         `;
         const result = await pool.query(query, [req.user.id]);
         res.json(result.rows);
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) { 
+        console.error('Notifications fetch error:', err);
+        res.status(500).json({ error: err.message }); 
+    }
 });
 
 router.get('/user/:id/followers', auth, async (req, res) => {
@@ -273,6 +369,7 @@ router.get('/user/:id/followers', auth, async (req, res) => {
         const result = await pool.query(query, [myId, targetUserId]);
         res.json(result.rows);
     } catch (err) { 
+        console.error('Followers fetch error:', err);
         res.status(500).json({ error: err.message }); 
     }
 });
@@ -298,11 +395,11 @@ router.get('/user/:id/following', auth, async (req, res) => {
         const result = await pool.query(query, [myId, targetUserId]);
         res.json(result.rows);
     } catch (err) { 
+        console.error('Following fetch error:', err);
         res.status(500).json({ error: err.message }); 
     }
 });
 
-// --- GET SPECIFIC USER POSTS ---
 router.get('/user/:id/posts', auth, async (req, res) => {
     try {
         const targetUserId = req.params.id;
@@ -323,16 +420,15 @@ router.get('/user/:id/posts', auth, async (req, res) => {
         const result = await pool.query(query, [myId, targetUserId]);
         res.json(result.rows);
     } catch (err) {
+        console.error('User posts fetch error:', err);
         res.status(500).json({ error: err.message });
     }
 });
 
-// --- GET USER'S SAVED PLACES (ITINERARIES) ---
 router.get('/user/:id/saved-places', auth, async (req, res) => {
     try {
         const targetUserId = req.params.id;
 
-        // Using the 'itineraries' table as the link between users and pois
         const query = `
             SELECT p.* FROM pois p
             JOIN itineraries i ON p.id = i.poi_id
@@ -358,29 +454,38 @@ router.get('/post/:id/comments', auth, async (req, res) => {
             ORDER BY c.created_at ASC
         `, [req.params.id]);
         res.json(result.rows);
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) { 
+        console.error('Comments fetch error:', err);
+        res.status(500).json({ error: err.message }); 
+    }
 });
 
-// --- DELETE POST ---
 router.delete('/post/:id', auth, async (req, res) => {
     try {
         const postId = req.params.id;
         const userId = req.user.id;
 
-        // Check ownership
-        const post = await pool.query('SELECT user_id FROM posts WHERE id = $1', [postId]);
+        const post = await pool.query('SELECT user_id, image_url FROM posts WHERE id = $1', [postId]);
         
         if (post.rows.length === 0) return res.status(404).json({ error: "Post not found" });
         if (post.rows[0].user_id !== userId) return res.status(403).json({ error: "Unauthorized" });
 
+        // Delete image file if it exists
+        if (post.rows[0].image_url) {
+            const imagePath = path.join(__dirname, '..', post.rows[0].image_url);
+            if (fs.existsSync(imagePath)) {
+                fs.unlinkSync(imagePath);
+            }
+        }
+
         await pool.query('DELETE FROM posts WHERE id = $1', [postId]);
         res.json({ success: true, message: "Post deleted" });
     } catch (err) {
+        console.error('Delete post error:', err);
         res.status(500).json({ error: err.message });
     }
 });
 
-// --- EDIT POST ---
 router.put('/post/:id', auth, async (req, res) => {
     const { content } = req.body;
     try {
@@ -388,6 +493,7 @@ router.put('/post/:id', auth, async (req, res) => {
         const userId = req.user.id;
 
         const post = await pool.query('SELECT user_id FROM posts WHERE id = $1', [postId]);
+        if (post.rows.length === 0) return res.status(404).json({ error: "Post not found" });
         if (post.rows[0].user_id !== userId) return res.status(403).json({ error: "Unauthorized" });
 
         const updated = await pool.query(
@@ -396,6 +502,7 @@ router.put('/post/:id', auth, async (req, res) => {
         );
         res.json(updated.rows[0]);
     } catch (err) {
+        console.error('Update post error:', err);
         res.status(500).json({ error: err.message });
     }
 });
