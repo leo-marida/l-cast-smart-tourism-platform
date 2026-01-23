@@ -18,6 +18,7 @@ export default function SocialFeed() {
   const [stories, setStories] = useState([]);
   const [newPost, setNewPost] = useState('');
   const [selectedImage, setSelectedImage] = useState(null); 
+  const [visibility, setVisibility] = useState('public'); // NEW: 'public' or 'followers'
   const [followingIds, setFollowingIds] = useState([]); 
   const [currentUserId, setCurrentUserId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -113,7 +114,7 @@ export default function SocialFeed() {
     useCallback(() => {
       fetchPosts();
       fetchStories();
-      loadSeenStories(); // Load seen status whenever screen is focused
+      loadSeenStories(); 
     }, [])
   );
 
@@ -138,12 +139,10 @@ export default function SocialFeed() {
     if (!currentUserGroup) return;
 
     if (activeStoryIndex < currentUserGroup.stories.length - 1) {
-      // Next story for SAME user
       const nextId = currentUserGroup.stories[activeStoryIndex + 1].id;
       saveSeenStory(nextId);
       setActiveStoryIndex(activeStoryIndex + 1);
     } else if (activeUserIndex < stories.length - 1) {
-      // Move to NEXT user
       const nextUserId = stories[activeUserIndex + 1].stories[0].id;
       saveSeenStory(nextUserId);
       setActiveUserIndex(activeUserIndex + 1);
@@ -178,7 +177,6 @@ export default function SocialFeed() {
     if (storyVisible) startStoryTimer();
   }, [activeStoryIndex, activeUserIndex, storyVisible]);
 
-  // Handle Post Story Upload
   const handlePickStoryImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -221,11 +219,17 @@ export default function SocialFeed() {
     if (!newPost && !selectedImage) return;
     try {
       if (editingPostId) {
-        await api.put(`/api/social/post/${editingPostId}`, { content: newPost });
+        // Update existing post (visibility update optional here)
+        await api.put(`/api/social/post/${editingPostId}`, { 
+          content: newPost,
+          visibility: visibility 
+        });
         setEditingPostId(null);
       } else {
         const formData = new FormData();
         formData.append('content', newPost);
+        formData.append('visibility', visibility); // NEW: Send visibility to backend
+
         if (selectedImage) {
           const filename = selectedImage.split('/').pop();
           const match = /\.(\w+)$/.exec(filename);
@@ -234,13 +238,16 @@ export default function SocialFeed() {
         }
         await api.post('/api/social/post', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       }
-      setNewPost(''); setSelectedImage(null); fetchPosts(); 
+      setNewPost(''); 
+      setSelectedImage(null); 
+      setVisibility('public'); // Reset visibility to default
+      fetchPosts(); 
     } catch(err) { Alert.alert("Error", "Could not process request."); }
   };
 
   const handlePostOptions = (post) => {
     Alert.alert("Post Options", "What would you like to do?", [
-      { text: "Edit", onPress: () => { setEditingPostId(post.id); setNewPost(post.content); } },
+      { text: "Edit", onPress: () => { setEditingPostId(post.id); setNewPost(post.content); setVisibility(post.visibility || 'public'); } },
       { text: "Delete", style: "destructive", onPress: () => confirmDelete(post.id) },
       { text: "Cancel", style: "cancel" }
     ]);
@@ -307,7 +314,6 @@ export default function SocialFeed() {
               </TouchableOpacity>
             )}
             renderItem={({ item, index }) => {
-              // Highlight circle if ANY story in group is unseen
               const hasUnseen = item.stories.some(s => !seenStoryIds.includes(s.id));
               return (
                 <TouchableOpacity 
@@ -326,6 +332,7 @@ export default function SocialFeed() {
           />
         </View>
 
+        {/* --- CREATE POST WITH PRIVACY SELECTOR --- */}
         <View style={styles.createPostContainer}>
           {editingPostId && (
             <View style={styles.editLabelRow}>
@@ -342,6 +349,27 @@ export default function SocialFeed() {
             value={newPost} 
             onChangeText={setNewPost} 
           />
+          
+          {/* Privacy Picker */}
+          <View style={styles.visibilityRow}>
+            <Text style={styles.visibilityLabel}>Visible to:</Text>
+            <TouchableOpacity 
+              style={[styles.visibilityBtn, visibility === 'public' && styles.visibilityBtnActive]} 
+              onPress={() => setVisibility('public')}
+            >
+              <Ionicons name="globe-outline" size={14} color={visibility === 'public' ? 'white' : '#666'} />
+              <Text style={[styles.visibilityBtnText, visibility === 'public' && styles.visibilityBtnTextActive]}>Everyone</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.visibilityBtn, visibility === 'followers' && styles.visibilityBtnActive]} 
+              onPress={() => setVisibility('followers')}
+            >
+              <Ionicons name="people-outline" size={14} color={visibility === 'followers' ? 'white' : '#666'} />
+              <Text style={[styles.visibilityBtnText, visibility === 'followers' && styles.visibilityBtnTextActive]}>Followers</Text>
+            </TouchableOpacity>
+          </View>
+
           {selectedImage && !editingPostId && (
             <View style={styles.previewContainer}>
               <Image source={{ uri: selectedImage }} style={styles.imagePreview} />
@@ -350,6 +378,7 @@ export default function SocialFeed() {
               </TouchableOpacity>
             </View>
           )}
+
           <View style={styles.createPostActions}>
             {!editingPostId ? (
               <TouchableOpacity onPress={pickImage} style={styles.iconButton}>
@@ -370,11 +399,11 @@ export default function SocialFeed() {
 
       <Animated.FlatList
         data={posts}
-        contentContainerStyle={{ paddingTop: 320, paddingBottom: 100 }}
+        contentContainerStyle={{ paddingTop: 380, paddingBottom: 100 }}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} progressViewOffset={320} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} progressViewOffset={380} />
         }
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => {
@@ -389,11 +418,20 @@ export default function SocialFeed() {
                     onPress={() => navigateToProfile(item.user_id)}
                 >
                   <View style={styles.avatarPlaceholder}>
-                     <Text style={styles.avatarLetter}>{item.username ? item.username[0].toUpperCase() : '?'}</Text>
+                      <Text style={styles.avatarLetter}>{item.username ? item.username[0].toUpperCase() : '?'}</Text>
                   </View>
                   <View>
                     <Text style={styles.username}>@{item.username}</Text>
-                    <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString()}</Text>
+                    <View style={styles.dateRow}>
+                        <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString()}</Text>
+                        {/* Visibility Icon on post */}
+                        <Ionicons 
+                            name={item.visibility === 'followers' ? "people" : "globe-outline"} 
+                            size={12} 
+                            color="#999" 
+                            style={{marginLeft: 5}} 
+                        />
+                    </View>
                   </View>
                 </TouchableOpacity>
 
@@ -445,7 +483,6 @@ export default function SocialFeed() {
                 resizeMode="cover"
               />
               
-              {/* TOP SEGMENTED PROGRESS BARS */}
               <View style={styles.multiProgressContainer}>
                 {stories[activeUserIndex].stories.map((_, idx) => (
                   <View key={idx} style={styles.progressSegmentBackground}>
@@ -474,7 +511,6 @@ export default function SocialFeed() {
                 </TouchableOpacity>
               </View>
 
-              {/* TAP REGIONS */}
               <View style={styles.navigationOverlay}>
                 <TouchableOpacity style={styles.navSide} onPress={prevStory} />
                 <TouchableOpacity style={styles.navSide} onPress={nextStory} />
@@ -508,11 +544,6 @@ const styles = StyleSheet.create({
   avatarLetterSmall: { fontWeight: 'bold', color: '#777', fontSize: 16 },
   storyModalContainer: { flex: 1, backgroundColor: 'black' },
   fullStoryImage: { width: '100%', height: '100%' },
-  progressContainer: {
-    position: 'absolute', top: 50, left: 10, right: 10, height: 3,
-    backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 2, overflow: 'hidden',
-  },
-  progressBar: { height: '100%', backgroundColor: 'white' },
   storyHeader: {
     position: 'absolute', top: 65, left: 15, right: 15,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
@@ -523,7 +554,16 @@ const styles = StyleSheet.create({
   editLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
   editLabel: { color: '#007AFF', fontWeight: 'bold', fontSize: 12 },
   cancelEdit: { color: 'red', fontSize: 12 },
-  postInput: { fontSize: 16, minHeight: 60, textAlignVertical: 'top' },
+  postInput: { fontSize: 16, minHeight: 50, textAlignVertical: 'top' },
+
+  // Visibility Styles
+  visibilityRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10, marginBottom: 5 },
+  visibilityLabel: { fontSize: 12, color: '#777', marginRight: 10 },
+  visibilityBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f2f5', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15, marginRight: 8 },
+  visibilityBtnActive: { backgroundColor: '#007AFF' },
+  visibilityBtnText: { fontSize: 11, color: '#666', marginLeft: 4 },
+  visibilityBtnTextActive: { color: 'white', fontWeight: 'bold' },
+
   createPostActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 10 },
   iconButton: { flexDirection: 'row', alignItems: 'center' },
   iconText: { marginLeft: 5, color: '#666', fontWeight: '600' },
@@ -536,6 +576,7 @@ const styles = StyleSheet.create({
   card: { backgroundColor: 'white', padding: 15, marginBottom: 8, elevation: 1 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
   userInfo: { flexDirection: 'row', alignItems: 'center' },
+  dateRow: { flexDirection: 'row', alignItems: 'center' },
   optionsBtn: { padding: 5 },
   avatarPlaceholder: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   avatarLetter: { color: 'white', fontWeight: 'bold' },
