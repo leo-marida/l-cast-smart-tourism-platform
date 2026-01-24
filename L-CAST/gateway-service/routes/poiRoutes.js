@@ -111,4 +111,24 @@ router.get('/saved', auth, async (req, res) => {
     }
 });
 
+// 5. SUBMIT LOCATION REQUEST
+router.post('/request', auth, async (req, res) => {
+    const { name, region, category } = req.body;
+
+    if (!name || !region) {
+        return res.status(400).json({ error: "Name and Region are required" });
+    }
+
+    try {
+        await pool.query(
+            'INSERT INTO location_requests (user_id, name, region, category) VALUES ($1, $2, $3, $4)',
+            [req.user.id, name, region, category || 'Other']
+        );
+        res.json({ message: "Suggestion submitted successfully! Our team will review it." });
+    } catch (err) {
+        console.error("Request Error:", err.message);
+        res.status(500).json({ error: "Failed to submit request" });
+    }
+});
+
 module.exports = router;

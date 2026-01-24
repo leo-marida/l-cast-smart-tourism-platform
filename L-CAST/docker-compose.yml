@@ -5,6 +5,9 @@ services:
     ports:
       - "3000:3000"
     env_file: .env
+    volumes:
+      - ./gateway-service:/usr/src/app
+      - gateway_uploads:/usr/src/app/uploads
     environment:
       - POSTGRES_HOST=database
       - REDIS_HOST=cache
@@ -72,3 +75,4 @@ services:
 volumes:
   postgres_data:
   neo4j_data:
+  gateway_uploads:
