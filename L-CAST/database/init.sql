@@ -8,6 +8,7 @@ CREATE TABLE users (
     email VARCHAR(100) UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     role VARCHAR(20) DEFAULT 'user', 
+    bio TEXT,
     interest_vector JSONB, 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -48,32 +49,71 @@ CREATE TABLE posts (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE post_likes (
-    user_id INTEGER REFERENCES users(id),
-    post_id INTEGER REFERENCES posts(id),
+-- 3. POSTS TABLE
+CREATE TABLE IF NOT EXISTS posts (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    poi_id INTEGER REFERENCES pois(id) ON DELETE SET NULL,
+    content TEXT,
+    image_url TEXT,
+    likes_count INTEGER DEFAULT 0,
+    visibility VARCHAR(20) DEFAULT 'public',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 4. STORIES TABLE
+CREATE TABLE IF NOT EXISTS stories (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    image_url TEXT NOT NULL,
+    visibility VARCHAR(20) DEFAULT 'public',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 5. FOLLOWS TABLE
+CREATE TABLE IF NOT EXISTS follows (
+    follower_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    following_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (follower_id, following_id)
+);
+
+-- 6. POST LIKES TABLE
+CREATE TABLE IF NOT EXISTS post_likes (
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
     PRIMARY KEY (user_id, post_id)
 );
 
--- 4. Itineraries
-CREATE TABLE itineraries (
+-- 7. POST COMMENTS TABLE
+CREATE TABLE IF NOT EXISTS post_comments (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id),
-    poi_id INTEGER REFERENCES pois(id),
-    visit_date DATE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, 
-    UNIQUE(user_id, poi_id)
+    post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 5. Seeding Admin
-INSERT INTO users (username, email, password_hash, role) 
-VALUES ('SuperAdmin', 'admin@lcast.lb', '$2a$12$GwS.G6.y/W.t8/W.t8/W.t8/W.t8/W.t8/W.t8/W.t8', 'admin');
-
--- 6. Follows Table (Social Graph)
-CREATE TABLE follows (
-    follower_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    following_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (follower_id, following_id),
-    -- Prevent users from following themselves
-    CONSTRAINT check_not_self_follow CHECK (follower_id <> following_id)
+-- 8. NOTIFICATIONS TABLE
+CREATE TABLE IF NOT EXISTS notifications (
+    id SERIAL PRIMARY KEY,
+    recipient_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    sender_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    type VARCHAR(20) NOT NULL, -- 'like', 'comment', 'follow'
+    post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- 9. ITINERARIES (Saved Places)
+CREATE TABLE IF NOT EXISTS itineraries (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    poi_id INTEGER REFERENCES pois(id) ON DELETE CASCADE,
+    visit_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_user_poi UNIQUE (user_id, poi_id)
+);
+
+-- 10. PATCH FOR EXISTING TABLES
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) DEFAULT 'public';
+ALTER TABLE stories ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) DEFAULT 'public';
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE;
