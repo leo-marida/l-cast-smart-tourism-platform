@@ -419,4 +419,26 @@ router.get('/user/:id/following', auth, async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+router.get('/users/search', auth, async (req, res) => {
+    const { query } = req.query; 
+    const myId = req.user.id;
+
+    if (!query) return res.json([]);
+
+    try {
+        // The $2 parameter will be "ha%"
+        const result = await pool.query(`
+            SELECT id, username, bio 
+            FROM users 
+            WHERE username ILIKE $2 AND id != $1
+            ORDER BY username ASC
+            LIMIT 8
+        `, [myId, `${query}%`]); 
+
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: "Search failed" });
+    }
+});
+
 module.exports = router;

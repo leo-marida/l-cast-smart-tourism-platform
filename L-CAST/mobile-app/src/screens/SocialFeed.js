@@ -39,6 +39,12 @@ export default function SocialFeed() {
   const lastScrollY = useRef(0);
   const headerTranslate = useRef(new Animated.Value(0)).current;
 
+  // --- SEARCH STATE ---
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchTimer = useRef(null);
+
   const handleScroll = Animated.event(
     [{ nativeEvent: { contentOffset: { y: scrollY } } }],
     {
@@ -57,6 +63,29 @@ export default function SocialFeed() {
       },
     }
   );
+
+  const handleSearch = (text) => {
+    setSearchQuery(text);
+    
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+
+    if (text.trim().length > 0) {
+      setIsSearching(true);
+      searchTimer.current = setTimeout(async () => {
+        try {
+          const res = await api.get(`/api/social/users/search?query=${text}`);
+          setSearchResults(res.data);
+        } catch (err) {
+          console.error("Search failed", err);
+        } finally {
+          setIsSearching(false);
+        }
+      }, 300); // 300ms delay
+    } else {
+      setSearchResults([]);
+      setIsSearching(false);
+    }
+  };
 
   // --- PERSISTENCE LOGIC ---
   const loadSeenStories = async () => {
@@ -291,11 +320,68 @@ export default function SocialFeed() {
       
       <Animated.View style={[styles.headerContainer, { transform: [{ translateY: headerTranslate }] }]}>
         <View style={styles.headerTopRow}>
-            <Text style={styles.headerTitle}>Community Pulse</Text>
-            <TouchableOpacity style={styles.notificationBtn} onPress={() => navigation.navigate('Notifications')}>
-                <Ionicons name="notifications-outline" size={26} color="#333" />
-                <View style={styles.unreadBadge} />
+          {/* 1. SEARCH BAR */}
+          <View style={styles.searchBarContainer}>
+            <Ionicons name="search-outline" size={18} color="#666" style={{ marginLeft: 10 }} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search users..."
+              value={searchQuery}
+              onChangeText={handleSearch}
+              placeholderTextColor="#999"
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => {setSearchQuery(''); setSearchResults([]);}}>
+                <Ionicons name="close-circle" size={18} color="#999" style={{ marginRight: 10 }} />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* 2. ACTION BUTTONS (Messages & Notifications) */}
+          <View style={styles.headerActions}>
+            <TouchableOpacity 
+              style={styles.actionBtn} 
+              onPress={() => navigation.navigate('Notifications')}
+            >
+              <Ionicons name="notifications-outline" size={24} color="#333" />
+              <View style={styles.unreadBadge} />
             </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.actionBtn} 
+              onPress={() => navigation.navigate('Messages')}
+            >
+              <Ionicons name="chatbubble-ellipses-outline" size={24} color="#333" />
+            </TouchableOpacity>
+          </View>
+
+          {/* 3. SEARCH RESULTS DROPDOWN (Positioned Absolute) */}
+          {searchResults.length > 0 && (
+            <View style={styles.searchResultsDropdown}>
+              <FlatList
+                data={searchResults}
+                keyExtractor={(item) => item.id.toString()}
+                renderItem={({ item }) => (
+                  <TouchableOpacity 
+                    style={styles.searchResultItem}
+                    onPress={() => {
+                      setSearchQuery('');
+                      setSearchResults([]);
+                      navigateToProfile(item.id);
+                    }}
+                  >
+                    <View style={styles.avatarPlaceholderSmallest}>
+                      <Text style={styles.avatarLetterSmallest}>{item.username[0].toUpperCase()}</Text>
+                    </View>
+                    <View>
+                      <Text style={styles.searchResultUsername}>@{item.username}</Text>
+                      {item.bio && <Text style={styles.searchResultBio} numberOfLines={1}>{item.bio}</Text>}
+                    </View>
+                  </TouchableOpacity>
+                )}
+              />
+            </View>
+          )}
         </View>
 
         {/* --- STORIES TRAY --- */}
@@ -524,12 +610,95 @@ export default function SocialFeed() {
 }
 
 const styles = StyleSheet.create({
+  // --- LAYOUT & MAIN CONTAINERS ---
   container: { flex: 1, backgroundColor: '#f0f2f5' },
-  headerContainer: { position: 'absolute', top: 0, marginTop: 30, left: 0, right: 0, zIndex: 10, backgroundColor: '#f0f2f5',},
-  headerTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', paddingRight: 20, },
-  notificationBtn: { padding: 5, position: 'relative' },
-  unreadBadge: {position: 'absolute', top: 5, right: 5, width: 10, height: 10, borderRadius: 5, backgroundColor: '#ff3b30', borderWidth: 1.5, borderColor: 'white', },
-  headerTitle: { fontSize: 24, fontWeight:'bold', padding: 15, backgroundColor: 'white', flex: 1 },
+  headerContainer: { 
+    position: 'absolute', 
+    top: 0, 
+    marginTop: 30, 
+    left: 0, 
+    right: 0, 
+    zIndex: 10, 
+    backgroundColor: '#f0f2f5' 
+  },
+  headerTopRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: 'white', 
+    paddingVertical: 5,
+    zIndex: 100 
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: 5
+  },
+  actionBtn: {
+    padding: 8,
+    position: 'relative'
+  },
+  unreadBadge: {
+    position: 'absolute', 
+    top: 8, 
+    right: 8, 
+    width: 8, 
+    height: 8, 
+    borderRadius: 4, 
+    backgroundColor: '#ff3b30', 
+    borderWidth: 1.5, 
+    borderColor: 'white', 
+  },
+
+  // --- SEARCH BAR STYLES ---
+  searchBarContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f2f5',
+    borderRadius: 20,
+    marginLeft: 15,
+    marginRight: 5,
+    height: 38,
+  },
+  searchInput: {
+    flex: 1,
+    paddingHorizontal: 10,
+    fontSize: 14,
+    color: '#333',
+  },
+
+  // --- SEARCH DROPDOWN STYLES ---
+  searchResultsDropdown: {
+    position: 'absolute',
+    top: 50, 
+    left: 15,
+    right: 80, 
+    backgroundColor: 'white',
+    borderRadius: 10,
+    maxHeight: 250,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    zIndex: 999,
+  },
+  searchResultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  searchResultUsername: { fontWeight: 'bold', color: '#333' },
+  searchResultBio: { fontSize: 12, color: '#777' },
+  avatarPlaceholderSmallest: {
+    width: 30, height: 30, borderRadius: 15, backgroundColor: '#007AFF',
+    justifyContent: 'center', alignItems: 'center', marginRight: 10
+  },
+  avatarLetterSmallest: { color: 'white', fontWeight: 'bold', fontSize: 12 },
+
+  // --- STORIES TRAY STYLES ---
   storiesWrapper: { backgroundColor: 'white', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
   storyCircleContainer: { alignItems: 'center', marginHorizontal: 8, width: 70 },
   storyCircle: {
@@ -542,28 +711,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center'
   },
   avatarLetterSmall: { fontWeight: 'bold', color: '#777', fontSize: 16 },
-  storyModalContainer: { flex: 1, backgroundColor: 'black' },
-  fullStoryImage: { width: '100%', height: '100%' },
-  storyHeader: {
-    position: 'absolute', top: 65, left: 15, right: 15,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-  },
-  storyHeaderUser: { flexDirection: 'row', alignItems: 'center' },
-  storyHeaderUsername: { color: 'white', fontWeight: 'bold', marginLeft: 10, fontSize: 16 },
+
+  // --- POST CREATION STYLES ---
   createPostContainer: { backgroundColor: 'white', padding: 15, marginBottom: 10, borderBottomWidth: 1, borderBottomColor: '#ddd' },
   editLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
   editLabel: { color: '#007AFF', fontWeight: 'bold', fontSize: 12 },
   cancelEdit: { color: 'red', fontSize: 12 },
   postInput: { fontSize: 16, minHeight: 50, textAlignVertical: 'top' },
-
-  // Visibility Styles
   visibilityRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10, marginBottom: 5 },
   visibilityLabel: { fontSize: 12, color: '#777', marginRight: 10 },
   visibilityBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f2f5', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15, marginRight: 8 },
   visibilityBtnActive: { backgroundColor: '#007AFF' },
   visibilityBtnText: { fontSize: 11, color: '#666', marginLeft: 4 },
   visibilityBtnTextActive: { color: 'white', fontWeight: 'bold' },
-
   createPostActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 10 },
   iconButton: { flexDirection: 'row', alignItems: 'center' },
   iconText: { marginLeft: 5, color: '#666', fontWeight: '600' },
@@ -573,6 +733,8 @@ const styles = StyleSheet.create({
   previewContainer: { position: 'relative', marginTop: 10 },
   imagePreview: { width: '100%', height: 150, borderRadius: 10 },
   removeImage: { position: 'absolute', top: 5, right: 5, backgroundColor: 'white', borderRadius: 12 },
+
+  // --- FEED / CARD STYLES ---
   card: { backgroundColor: 'white', padding: 15, marginBottom: 8, elevation: 1 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
   userInfo: { flexDirection: 'row', alignItems: 'center' },
@@ -592,9 +754,16 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', justifyContent: 'space-around' },
   actionItem: { flexDirection: 'row', alignItems: 'center' },
   actionText: { marginLeft: 8, color: '#666', fontWeight: '500' },
+
+  // --- STORY VIEWER MODAL STYLES ---
+  storyModalContainer: { flex: 1, backgroundColor: 'black' },
+  fullStoryImage: { width: '100%', height: '100%' },
+  storyHeader: { position: 'absolute', top: 65, left: 15, right: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  storyHeaderUser: { flexDirection: 'row', alignItems: 'center' },
+  storyHeaderUsername: { color: 'white', fontWeight: 'bold', marginLeft: 10, fontSize: 16 },
   multiProgressContainer: { position: 'absolute', top: 50, left: 10, right: 10, flexDirection: 'row', height: 3, gap: 5},
-  progressSegmentBackground: {flex: 1, height: 3, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 2, overflow: 'hidden'},
+  progressSegmentBackground: { flex: 1, height: 3, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 2, overflow: 'hidden'},
   progressSegmentFill: { height: '100%', backgroundColor: 'white'},
-  navigationOverlay: {...StyleSheet.absoluteFillObject, flexDirection: 'row', marginTop: 100 },
+  navigationOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', marginTop: 100 },
   navSide: { flex: 1 }
 });
