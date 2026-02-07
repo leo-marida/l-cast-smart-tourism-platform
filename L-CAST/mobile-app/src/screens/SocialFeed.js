@@ -316,11 +316,10 @@ export default function SocialFeed() {
 
   return (
     <View style={styles.container}>
-      <SafeAreaView edges={['top']} style={{ backgroundColor: 'white', zIndex: 11 }} />
-      
-      <Animated.View style={[styles.headerContainer, { transform: [{ translateY: headerTranslate }] }]}>
+      {/* 1. FIXED TOP BAR - Stays at the top while scrolling */}
+      <SafeAreaView edges={['top']} style={{ backgroundColor: 'white', zIndex: 110 }}>
         <View style={styles.headerTopRow}>
-          {/* 1. SEARCH BAR */}
+          {/* SEARCH BAR */}
           <View style={styles.searchBarContainer}>
             <Ionicons name="search-outline" size={18} color="#666" style={{ marginLeft: 10 }} />
             <TextInput
@@ -337,7 +336,7 @@ export default function SocialFeed() {
             )}
           </View>
 
-          {/* 2. ACTION BUTTONS (Messages & Notifications) */}
+          {/* ACTION BUTTONS */}
           <View style={styles.headerActions}>
             <TouchableOpacity 
               style={styles.actionBtn} 
@@ -355,7 +354,7 @@ export default function SocialFeed() {
             </TouchableOpacity>
           </View>
 
-          {/* 3. SEARCH RESULTS DROPDOWN (Positioned Absolute) */}
+          {/* SEARCH RESULTS DROPDOWN */}
           {searchResults.length > 0 && (
             <View style={styles.searchResultsDropdown}>
               <FlatList
@@ -383,8 +382,14 @@ export default function SocialFeed() {
             </View>
           )}
         </View>
+      </SafeAreaView>
 
-        {/* --- STORIES TRAY --- */}
+      {/* 2. ANIMATED HEADER - Stories & Post Input disappear on scroll */}
+      <Animated.View style={[
+        styles.headerContainer, 
+        { transform: [{ translateY: headerTranslate }], top: 50 } // Starts after fixed bar
+      ]}>
+        {/* STORIES TRAY */}
         <View style={styles.storiesWrapper}>
           <FlatList
             horizontal
@@ -394,7 +399,7 @@ export default function SocialFeed() {
             ListHeaderComponent={() => (
               <TouchableOpacity style={styles.storyCircleContainer} onPress={handlePickStoryImage}>
                 <View style={[styles.storyCircle, { borderColor: '#ccc', borderStyle: 'dashed' }]}>
-                   <Ionicons name="add" size={30} color="#007AFF" />
+                  <Ionicons name="add" size={30} color="#007AFF" />
                 </View>
                 <Text style={styles.storyUsername}>Your Story</Text>
               </TouchableOpacity>
@@ -418,7 +423,7 @@ export default function SocialFeed() {
           />
         </View>
 
-        {/* --- CREATE POST WITH PRIVACY SELECTOR --- */}
+        {/* CREATE POST BOX */}
         <View style={styles.createPostContainer}>
           {editingPostId && (
             <View style={styles.editLabelRow}>
@@ -436,7 +441,6 @@ export default function SocialFeed() {
             onChangeText={setNewPost} 
           />
           
-          {/* Privacy Picker */}
           <View style={styles.visibilityRow}>
             <Text style={styles.visibilityLabel}>Visible to:</Text>
             <TouchableOpacity 
@@ -483,13 +487,14 @@ export default function SocialFeed() {
         </View>
       </Animated.View>
 
+      {/* 3. MAIN FEED */}
       <Animated.FlatList
         data={posts}
-        contentContainerStyle={{ paddingTop: 380, paddingBottom: 100 }}
+        contentContainerStyle={{ paddingTop: 290, paddingBottom: 100 }} // Reduced padding since fixed bar moved
         onScroll={handleScroll}
         scrollEventThrottle={16}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} progressViewOffset={380} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} progressViewOffset={330} />
         }
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => {
@@ -510,7 +515,6 @@ export default function SocialFeed() {
                     <Text style={styles.username}>@{item.username}</Text>
                     <View style={styles.dateRow}>
                         <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString()}</Text>
-                        {/* Visibility Icon on post */}
                         <Ionicons 
                             name={item.visibility === 'followers' ? "people" : "globe-outline"} 
                             size={12} 
@@ -558,7 +562,7 @@ export default function SocialFeed() {
         }}
       />
 
-      {/* --- STORY VIEWER MODAL --- */}
+      {/* 4. STORY VIEWER MODAL */}
       <Modal visible={storyVisible} transparent={false} animationType="fade" onRequestClose={closeStory}>
         <View style={styles.storyModalContainer}>
           {stories[activeUserIndex] && (
@@ -576,7 +580,7 @@ export default function SocialFeed() {
                       styles.progressSegmentFill, 
                       { 
                         width: idx === activeStoryIndex ? storyProgress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) 
-                               : idx < activeStoryIndex ? '100%' : '0%' 
+                              : idx < activeStoryIndex ? '100%' : '0%' 
                       }
                     ]} />
                   </View>
@@ -614,19 +618,21 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f0f2f5' },
   headerContainer: { 
     position: 'absolute', 
-    top: 0, 
+    top: 50, 
     marginTop: 30, 
     left: 0, 
     right: 0, 
-    zIndex: 10, 
+    zIndex: 9, 
     backgroundColor: '#f0f2f5' 
   },
   headerTopRow: { 
     flexDirection: 'row', 
     alignItems: 'center', 
     backgroundColor: 'white', 
-    paddingVertical: 5,
-    zIndex: 100 
+    paddingVertical: 8,
+    zIndex: 100,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee'
   },
   headerActions: {
     flexDirection: 'row',
