@@ -18,6 +18,7 @@ import UserListScreen from './src/screens/UserListScreen';
 import PostDetail from './src/screens/PostDetail';
 import UserProfileScreen from './src/screens/UserProfileScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
+import MessagesScreen from './src/screens/MessagesScreen'
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -100,6 +101,7 @@ export default function App() {
           }} 
         />
         <Stack.Screen name="UserProfile" component={UserProfileScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Messages" component={MessagesScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

@@ -161,6 +161,19 @@ export default function HomeScreen({ navigation }) {
               </View>
             ))}
           </View>
+
+          <View style={styles.poiActionsRow}>
+            <TouchableOpacity 
+              style={styles.communityBtn}
+              onPress={() => navigation.navigate('Community', { 
+                filterPoiId: item.id, 
+                filterPoiName: item.name 
+              })}
+            >
+              <Ionicons name="people-circle-outline" size={18} color="white" />
+              <Text style={styles.communityBtnText}>View Posts</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -293,4 +306,27 @@ const styles = StyleSheet.create({
   loadingContent: { alignItems: 'center', padding: 20 },
   loadingText: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 8 },
   loadingSubText: { fontSize: 14, color: '#666', textAlign: 'center' },
+  poiActionsRow: { 
+  flexDirection: 'row', 
+  justifyContent: 'space-between', 
+  alignItems: 'center', 
+  marginTop: 10, 
+  paddingTop: 10, 
+  borderTopWidth: 1, 
+  borderTopColor: '#f0f0f0' 
+  },
+  communityBtn: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: '#007AFF', 
+    paddingVertical: 8, 
+    paddingHorizontal: 12, 
+    borderRadius: 10 
+  },
+  communityBtnText: { 
+    color: 'white', 
+    fontSize: 12, 
+    fontWeight: 'bold', 
+    marginLeft: 5 
+  },
 });
