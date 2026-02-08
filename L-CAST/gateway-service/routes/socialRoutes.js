@@ -407,13 +407,20 @@ router.get('/post/:id/comments', auth, async (req, res) => {
 router.get('/notifications', auth, async (req, res) => {
     try {
         const query = `
-            SELECT n.*, u.username as sender_name FROM notifications n
-            JOIN users u ON n.sender_id = u.id
-            WHERE n.recipient_id = $1 ORDER BY n.created_at DESC LIMIT 50
+            SELECT n.*, u.username as sender_name 
+            FROM notifications n
+            LEFT JOIN users u ON n.sender_id = u.id
+            WHERE n.recipient_id = $1 
+            ORDER BY n.created_at DESC 
+            LIMIT 50
         `;
+        
         const result = await pool.query(query, [req.user.id]);
         res.json(result.rows);
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) { 
+        console.error(err);
+        res.status(500).json({ error: err.message }); 
+    }
 });
 
 router.get('/user/:id/followers', auth, async (req, res) => {

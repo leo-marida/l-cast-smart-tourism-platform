@@ -14,7 +14,6 @@ CREATE TABLE users (
 );
 
 -- 2. POIs (The Places)
--- Merged fields from your previous init and seed files
 CREATE TABLE pois (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -113,7 +112,20 @@ CREATE TABLE IF NOT EXISTS itineraries (
     CONSTRAINT unique_user_poi UNIQUE (user_id, poi_id)
 );
 
+CREATE TABLE IF NOT EXISTS location_requests (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    region VARCHAR(255) NOT NULL,
+    category VARCHAR(50),
+    status VARCHAR(20) DEFAULT 'pending', -- 'pending', 'approved', 'rejected'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 10. PATCH FOR EXISTING TABLES
 ALTER TABLE posts ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) DEFAULT 'public';
 ALTER TABLE stories ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) DEFAULT 'public';
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE;
+ALTER TABLE notifications ADD COLUMN message TEXT;
+ALTER TABLE notifications ALTER COLUMN sender_id DROP NOT NULL;
+ALTER TABLE notifications ALTER COLUMN post_id DROP NOT NULL;

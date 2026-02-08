@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'; // <--- THIS WAS MISSING
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -32,11 +32,15 @@ export default function NotificationsScreen({ navigation }) {
     fetchNotifications();
   }, []);
 
+  // --- 1. NEW ICON LOGIC ---
   const getIcon = (type) => {
     switch (type) {
       case 'like': return { name: 'heart', color: '#e74c3c' };
       case 'comment': return { name: 'chatbubble', color: '#007AFF' };
       case 'follow': return { name: 'person-add', color: '#2ecc71' };
+      // NEW TYPES
+      case 'admin_alert': return { name: 'megaphone', color: '#f39c12' }; // Orange
+      case 'request_status': return { name: 'map', color: '#9b59b6' };   // Purple
       default: return { name: 'notifications', color: '#999' };
     }
   };
@@ -44,16 +48,24 @@ export default function NotificationsScreen({ navigation }) {
   const renderItem = ({ item }) => {
     const icon = getIcon(item.type);
     
+    // Check if it is a system message
+    const isSystemNotif = ['admin_alert', 'request_status'].includes(item.type);
+
     return (
       <TouchableOpacity 
-        style={styles.notifCard}
+        style={[styles.notifCard, !item.is_read && styles.unreadBackground]}
         onPress={() => {
+          // --- 2. PREVENT CRASH ON CLICK ---
           if (item.post_id) {
             navigation.navigate('PostDetail', { postId: item.post_id });
-          } else {
+          } else if (!isSystemNotif) {
+            // Only go to profile if it's a REAL user (like/comment/follow)
             navigation.navigate('UserProfile', { userId: item.sender_id });
           }
+          // (Optional) Add logic here to mark as read
         }}
+        // Disable click effect for system messages since they don't go anywhere
+        activeOpacity={isSystemNotif ? 1 : 0.7} 
       >
         <View style={[styles.iconCircle, { backgroundColor: icon.color + '20' }]}>
           <Ionicons name={icon.name} size={20} color={icon.color} />
@@ -61,12 +73,23 @@ export default function NotificationsScreen({ navigation }) {
         
         <View style={styles.notifContent}>
           <Text style={styles.notifText}>
-            <Text style={styles.boldText}>@{item.sender_name}</Text>
-            {item.type === 'like' && ' liked your post.'}
-            {item.type === 'comment' && ' commented on your post.'}
-            {item.type === 'follow' && ' started following you.'}
+            {/* --- 3. CORRECT TEXT RENDERING --- */}
+            {isSystemNotif ? (
+              // Case A: Show the database message (Admin Alerts)
+              <Text style={styles.systemText}>{item.message}</Text>
+            ) : (
+              // Case B: Show Social Text
+              <>
+                <Text style={styles.boldText}>@{item.sender_name || "User"}</Text>
+                {item.type === 'like' && ' liked your post.'}
+                {item.type === 'comment' && ' commented on your post.'}
+                {item.type === 'follow' && ' started following you.'}
+              </>
+            )}
           </Text>
-          <Text style={styles.timeText}>{new Date(item.created_at).toLocaleDateString()}</Text>
+          <Text style={styles.timeText}>
+            {new Date(item.created_at).toLocaleDateString()}
+          </Text>
         </View>
 
         {!item.is_read && <View style={styles.unreadDot} />}
@@ -76,9 +99,7 @@ export default function NotificationsScreen({ navigation }) {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#007AFF" />
-      </View>
+      <View style={styles.center}><ActivityIndicator size="large" color="#007AFF" /></View>
     );
   }
 
@@ -88,9 +109,7 @@ export default function NotificationsScreen({ navigation }) {
         data={notifications}
         keyExtractor={(item) => item.id.toString()}
         renderItem={renderItem}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={fetchNotifications} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={fetchNotifications} />}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="notifications-off-outline" size={60} color="#ccc" />
@@ -113,25 +132,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
+  unreadBackground: { backgroundColor: '#f0f8ff' },
   iconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
+    width: 40, height: 40, borderRadius: 20,
+    justifyContent: 'center', alignItems: 'center', marginRight: 12,
   },
   notifContent: { flex: 1 },
   notifText: { fontSize: 15, color: '#333', lineHeight: 20 },
+  systemText: { color: '#333', fontStyle: 'italic' }, // Style for Admin messages
   boldText: { fontWeight: 'bold' },
   timeText: { fontSize: 12, color: '#999', marginTop: 4 },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#007AFF',
-    marginLeft: 10,
-  },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#007AFF', marginLeft: 10 },
   emptyContainer: { alignItems: 'center', marginTop: 100 },
   emptyText: { color: '#999', marginTop: 10, fontSize: 16 },
 });
