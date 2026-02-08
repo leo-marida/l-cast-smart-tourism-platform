@@ -111,27 +111,44 @@ router.post('/story', auth, upload.single('image'), async (req, res) => {
 router.get('/feed', auth, async (req, res) => {
     try {
         const myId = req.user.id;
+        const { poi_id } = req.query; // Catch the filter from the frontend URL
+
+        // 1. Build a dynamic filter if poi_id is provided
+        let poiFilter = "";
+        let queryParams = [myId];
+
+        if (poi_id) {
+            poiFilter = `AND p.poi_id = $2`; 
+            queryParams.push(poi_id);
+        }
+
         const postsQuery = `
             SELECT 
-                p.id, p.content, p.image_url, p.created_at, p.likes_count, p.visibility,
+                p.id, p.content, p.image_url, p.created_at, p.likes_count, p.visibility, p.poi_id,
                 u.username, u.id AS user_id,
+                poi.name AS location_name,
                 (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) AS comment_count,
                 EXISTS (SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = u.id) AS is_following,
                 EXISTS (SELECT 1 FROM post_likes WHERE user_id = $1 AND post_id = p.id) AS is_liked
             FROM posts p 
             JOIN users u ON p.user_id = u.id 
-            WHERE 
+            LEFT JOIN pois poi ON p.poi_id = poi.id
+            WHERE (
                 p.visibility = 'public' 
                 OR p.user_id = $1 
                 OR (p.visibility = 'followers' AND EXISTS (
                     SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = p.user_id
                 ))
+            )
+            ${poiFilter} -- This injects "AND p.poi_id = $2" only if requested
             ORDER BY p.created_at DESC 
             LIMIT 50
         `;
-        const postsResult = await pool.query(postsQuery, [myId]);
+
+        const postsResult = await pool.query(postsQuery, queryParams);
         const posts = postsResult.rows;
 
+        // Fetch comments (Rest of your logic remains the same)
         const feedWithComments = await Promise.all(posts.map(async (post) => {
             const commentRes = await pool.query(`
                 SELECT c.*, u.username FROM post_comments c
@@ -263,10 +280,12 @@ router.get('/user/:id/posts', auth, async (req, res) => {
         
         const query = `
             SELECT p.*, u.username, u.id AS user_id,
+                poi.name AS location_name, -- Added location name
                 (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) AS comment_count,
                 EXISTS (SELECT 1 FROM post_likes WHERE user_id = $1 AND post_id = p.id) AS is_liked
             FROM posts p 
             JOIN users u ON p.user_id = u.id 
+            LEFT JOIN pois poi ON p.poi_id = poi.id -- Added Join to pois table
             WHERE p.user_id = $2
             AND (
                 p.visibility = 'public' 
@@ -438,6 +457,17 @@ router.get('/users/search', auth, async (req, res) => {
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: "Search failed" });
+    }
+});
+
+// --- LOCATIONS FOR TAGGING ---
+// Fetch all Points of Interest to allow tagging in posts
+router.get('/pois', auth, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT id, name, category, region FROM pois ORDER BY name ASC');
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch locations" });
     }
 });
 

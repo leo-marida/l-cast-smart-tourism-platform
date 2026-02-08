@@ -6,9 +6,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker'; 
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
+import { useFocusEffect, useRoute, useNavigation } from '@react-navigation/native';
 
 const STORAGE_KEY = '@seen_stories';
 const { width } = Dimensions.get('window');
@@ -44,6 +44,15 @@ export default function SocialFeed() {
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const searchTimer = useRef(null);
+
+  // --- LOCATION STATES ---
+  const [selectedLocation, setSelectedLocation] = useState(null); // Stores {id, name}
+  const [locationModalVisible, setLocationModalVisible] = useState(false);
+  const [allLocations, setAllLocations] = useState([]); // List from your API
+
+  const route = useRoute(); // Import useRoute from @react-navigation/native
+  const filterPoiId = route.params?.filterPoiId;
+  const filterPoiName = route.params?.filterPoiName;
 
   const handleScroll = Animated.event(
     [{ nativeEvent: { contentOffset: { y: scrollY } } }],
@@ -87,6 +96,17 @@ export default function SocialFeed() {
     }
   };
 
+  const fetchPois = async () => {
+    try {
+      const res = await api.get('/api/social/pois');
+      console.log("Locations found:", res.data); // <--- Check your debugger/terminal
+      setAllLocations(res.data);
+    } catch (err) {
+      console.error("POI Fetch error:", err);
+      Alert.alert("Error", "Could not load locations.");
+    }
+  };
+
   // --- PERSISTENCE LOGIC ---
   const loadSeenStories = async () => {
     try {
@@ -115,15 +135,32 @@ export default function SocialFeed() {
 
   const fetchPosts = async () => {
     try {
-      const res = await api.get('/api/social/feed');
-      setPosts(res.data.map(p => ({ 
+      // 1. Determine the URL based on whether a filter is active
+      const url = filterPoiId 
+        ? `/api/social/feed?poi_id=${filterPoiId}` 
+        : '/api/social/feed';
+
+      const res = await api.get(url);
+      
+      // 2. Map the data just like you did before
+      const mappedPosts = res.data.map(p => ({ 
         ...p, 
         isLiked: p.is_liked || false,
         comment_count: parseInt(p.comment_count) || 0 
-      })));
-      const idsFromServer = res.data.filter(p => p.is_following === true).map(p => p.user_id);
+      }));
+
+      setPosts(mappedPosts);
+
+      // 3. Update following IDs
+      const idsFromServer = res.data
+        .filter(p => p.is_following === true)
+        .map(p => p.user_id);
+        
       setFollowingIds([...new Set(idsFromServer)]);
-    } catch (err) { console.error(err); }
+      
+    } catch (err) { 
+      console.error("Fetch posts error:", err); 
+    }
   };
 
   const fetchMyProfile = async () => {
@@ -143,8 +180,9 @@ export default function SocialFeed() {
     useCallback(() => {
       fetchPosts();
       fetchStories();
-      loadSeenStories(); 
-    }, [])
+      loadSeenStories();
+      fetchPois(); 
+    }, [filterPoiId])
   );
 
   useEffect(() => {
@@ -259,6 +297,10 @@ export default function SocialFeed() {
         formData.append('content', newPost);
         formData.append('visibility', visibility); // NEW: Send visibility to backend
 
+        if (selectedLocation) {
+          formData.append('poi_id', selectedLocation.id); 
+        }
+
         if (selectedImage) {
           const filename = selectedImage.split('/').pop();
           const match = /\.(\w+)$/.exec(filename);
@@ -269,6 +311,7 @@ export default function SocialFeed() {
       }
       setNewPost(''); 
       setSelectedImage(null); 
+      setSelectedLocation(null);
       setVisibility('public'); // Reset visibility to default
       fetchPosts(); 
     } catch(err) { Alert.alert("Error", "Could not process request."); }
@@ -428,11 +471,12 @@ export default function SocialFeed() {
           {editingPostId && (
             <View style={styles.editLabelRow}>
               <Text style={styles.editLabel}>Editing Post...</Text>
-              <TouchableOpacity onPress={() => { setEditingPostId(null); setNewPost(''); }}>
+              <TouchableOpacity onPress={() => { setEditingPostId(null); setNewPost(''); setSelectedLocation(null); }}>
                 <Text style={styles.cancelEdit}>Cancel</Text>
               </TouchableOpacity>
             </View>
           )}
+          
           <TextInput 
             style={styles.postInput} 
             placeholder={editingPostId ? "Edit your post..." : "What's happening?"} 
@@ -440,7 +484,8 @@ export default function SocialFeed() {
             value={newPost} 
             onChangeText={setNewPost} 
           />
-          
+
+          {/* VISIBILITY & LOCATION SELECTION ROW */}
           <View style={styles.visibilityRow}>
             <Text style={styles.visibilityLabel}>Visible to:</Text>
             <TouchableOpacity 
@@ -458,7 +503,33 @@ export default function SocialFeed() {
               <Ionicons name="people-outline" size={14} color={visibility === 'followers' ? 'white' : '#666'} />
               <Text style={[styles.visibilityBtnText, visibility === 'followers' && styles.visibilityBtnTextActive]}>Followers</Text>
             </TouchableOpacity>
+
+            {/* Location Toggle Button */}
+            <TouchableOpacity 
+              style={[styles.visibilityBtn, selectedLocation && styles.tagButtonActive]} 
+              onPress={() => setLocationModalVisible(true)}
+            >
+              <Ionicons 
+                name="location-outline" 
+                size={14} 
+                color={selectedLocation ? 'white' : '#666'} 
+              />
+              <Text style={[styles.visibilityBtnText, selectedLocation && styles.visibilityBtnTextActive]}>
+                {selectedLocation ? "Located" : "Location"}
+              </Text>
+            </TouchableOpacity>
           </View>
+
+          {/* SELECTED LOCATION BADGE (Shows below the input when active) */}
+          {selectedLocation && (
+            <View style={styles.activeLocationBadge}>
+              <Ionicons name="map-outline" size={14} color="#007AFF" />
+              <Text style={styles.activeLocationText}>{selectedLocation.name}</Text>
+              <TouchableOpacity onPress={() => setSelectedLocation(null)}>
+                <Ionicons name="close-circle" size={16} color="#ff3b30" style={{ marginLeft: 5 }} />
+              </TouchableOpacity>
+            </View>
+          )}
 
           {selectedImage && !editingPostId && (
             <View style={styles.previewContainer}>
@@ -479,7 +550,10 @@ export default function SocialFeed() {
             
             <TouchableOpacity 
               onPress={handlePost} 
-              style={[styles.publishButton, (!newPost && !selectedImage) && styles.disabledButton]}
+              style={[
+                styles.publishButton, 
+                (!newPost && !selectedImage && !selectedLocation) && styles.disabledButton
+              ]}
             >
               <Text style={styles.publishButtonText}>{editingPostId ? "Update" : "Post"}</Text>
             </TouchableOpacity>
@@ -490,12 +564,61 @@ export default function SocialFeed() {
       {/* 3. MAIN FEED */}
       <Animated.FlatList
         data={posts}
-        contentContainerStyle={{ paddingTop: 290, paddingBottom: 100 }} // Reduced padding since fixed bar moved
+        contentContainerStyle={{ paddingTop: 290, paddingBottom: 100 }}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} progressViewOffset={330} />
         }
+        // --- ADDED ListHeaderComponent HERE ---
+        ListHeaderComponent={
+          filterPoiId ? (
+            <View style={styles.filterNoticeInList}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                <Ionicons name="location" size={18} color="#007AFF" />
+                <Text style={styles.filterNoticeText} numberOfLines={1}>
+                  Posts at <Text style={{ fontWeight: 'bold' }}>{filterPoiName}</Text>
+                </Text>
+              </View>
+              <TouchableOpacity 
+                onPress={() => navigation.setParams({ filterPoiId: null, filterPoiName: null })}
+                style={styles.clearFilterBtn}
+              >
+                <Text style={styles.clearText}>Clear</Text>
+                <Ionicons name="close-circle" size={16} color="#ff3b30" />
+              </TouchableOpacity>
+            </View>
+          ) : null
+        }
+
+        ListEmptyComponent={
+          !refreshing ? (
+            <View style={styles.emptyStateContainer}>
+              <Ionicons 
+                name={filterPoiId ? "location-outline" : "newspaper-outline"} 
+                size={60} 
+                color="#ccc" 
+              />
+              <Text style={styles.emptyStateTitle}>
+                {filterPoiId ? "No posts here yet" : "Your feed is empty"}
+              </Text>
+              <Text style={styles.emptyStateSubtext}>
+                {filterPoiId 
+                  ? `Be the first to share something about ${filterPoiName}!`
+                  : "Follow some users or post something to get started."}
+              </Text>
+              {filterPoiId && (
+                <TouchableOpacity 
+                  style={styles.emptyActionBtn}
+                  onPress={() => navigation.setParams({ filterPoiId: null, filterPoiName: null })}
+                >
+                  <Text style={styles.emptyActionText}>See all community posts</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : null
+        }
+        // --------------------------------------
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => {
           const isFollowing = followingIds.includes(item.user_id);
@@ -505,22 +628,30 @@ export default function SocialFeed() {
             <View style={styles.card}>
               <View style={styles.header}>
                 <TouchableOpacity 
-                    style={styles.userInfo} 
-                    onPress={() => navigateToProfile(item.user_id)}
+                  style={styles.userInfo} 
+                  onPress={() => navigateToProfile(item.user_id)}
                 >
                   <View style={styles.avatarPlaceholder}>
-                      <Text style={styles.avatarLetter}>{item.username ? item.username[0].toUpperCase() : '?'}</Text>
+                    <Text style={styles.avatarLetter}>{item.username ? item.username[0].toUpperCase() : '?'}</Text>
                   </View>
                   <View>
                     <Text style={styles.username}>@{item.username}</Text>
+                    
+                    {item.location_name && (
+                      <View style={styles.locationMarkerRow}>
+                        <Ionicons name="location" size={12} color="#007AFF" />
+                        <Text style={styles.locationNameText}>{item.location_name}</Text>
+                      </View>
+                    )}
+
                     <View style={styles.dateRow}>
-                        <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString()}</Text>
-                        <Ionicons 
-                            name={item.visibility === 'followers' ? "people" : "globe-outline"} 
-                            size={12} 
-                            color="#999" 
-                            style={{marginLeft: 5}} 
-                        />
+                      <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString()}</Text>
+                      <Ionicons 
+                        name={item.visibility === 'followers' ? "people" : "globe-outline"} 
+                        size={12} 
+                        color="#999" 
+                        style={{marginLeft: 5}} 
+                      />
                     </View>
                   </View>
                 </TouchableOpacity>
@@ -609,116 +740,63 @@ export default function SocialFeed() {
           )}
         </View>
       </Modal>
+
+      <Modal visible={locationModalVisible} animationType="slide">
+        <SafeAreaView style={{ flex: 1, backgroundColor: 'white' }}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Where are you?</Text>
+            <TouchableOpacity onPress={() => setLocationModalVisible(false)}>
+              <Ionicons name="close" size={28} color="black" />
+            </TouchableOpacity>
+          </View>
+          <FlatList 
+            data={allLocations} 
+            keyExtractor={(item) => item.id.toString()} 
+            renderItem={({ item }) => (
+              <TouchableOpacity 
+                style={styles.locationItem} 
+                onPress={() => { 
+                  setSelectedLocation({ id: item.id, name: item.name }); 
+                  setLocationModalVisible(false); 
+                }}
+              >
+                <View style={styles.locationIconCircle}>
+                  <Ionicons name="map" size={18} color="white" />
+                </View>
+                <View>
+                  <Text style={styles.locationItemName}>{item.name}</Text>
+                  <Text style={styles.locationItemSub}>{item.region || item.category}</Text>
+                </View>
+              </TouchableOpacity>
+            )} 
+          />
+        </SafeAreaView>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  // --- LAYOUT & MAIN CONTAINERS ---
   container: { flex: 1, backgroundColor: '#f0f2f5' },
-  headerContainer: { 
-    position: 'absolute', 
-    top: 50, 
-    marginTop: 30, 
-    left: 0, 
-    right: 0, 
-    zIndex: 9, 
-    backgroundColor: '#f0f2f5' 
-  },
-  headerTopRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: 'white', 
-    paddingVertical: 8,
-    zIndex: 100,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee'
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingRight: 5
-  },
-  actionBtn: {
-    padding: 8,
-    position: 'relative'
-  },
-  unreadBadge: {
-    position: 'absolute', 
-    top: 8, 
-    right: 8, 
-    width: 8, 
-    height: 8, 
-    borderRadius: 4, 
-    backgroundColor: '#ff3b30', 
-    borderWidth: 1.5, 
-    borderColor: 'white', 
-  },
-
-  // --- SEARCH BAR STYLES ---
-  searchBarContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f0f2f5',
-    borderRadius: 20,
-    marginLeft: 15,
-    marginRight: 5,
-    height: 38,
-  },
-  searchInput: {
-    flex: 1,
-    paddingHorizontal: 10,
-    fontSize: 14,
-    color: '#333',
-  },
-
-  // --- SEARCH DROPDOWN STYLES ---
-  searchResultsDropdown: {
-    position: 'absolute',
-    top: 50, 
-    left: 15,
-    right: 80, 
-    backgroundColor: 'white',
-    borderRadius: 10,
-    maxHeight: 250,
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    zIndex: 999,
-  },
-  searchResultItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
+  headerContainer: { position: 'absolute', top: 50, marginTop: 30, left: 0, right: 0, zIndex: 9, backgroundColor: '#f0f2f5' },
+  headerTopRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', paddingVertical: 8, zIndex: 100, borderBottomWidth: 1, borderBottomColor: '#eee' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', paddingRight: 5 },
+  actionBtn: { padding: 8, position: 'relative' },
+  unreadBadge: { position: 'absolute', top: 8, right: 8, width: 8, height: 8, borderRadius: 4, backgroundColor: '#ff3b30', borderWidth: 1.5, borderColor: 'white' },
+  searchBarContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f2f5', borderRadius: 20, marginLeft: 15, marginRight: 5, height: 38 },
+  searchInput: { flex: 1, paddingHorizontal: 10, fontSize: 14, color: '#333' },
+  searchResultsDropdown: { position: 'absolute', top: 50, left: 15, right: 80, backgroundColor: 'white', borderRadius: 10, maxHeight: 250, elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, zIndex: 999 },
+  searchResultItem: { flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
   searchResultUsername: { fontWeight: 'bold', color: '#333' },
   searchResultBio: { fontSize: 12, color: '#777' },
-  avatarPlaceholderSmallest: {
-    width: 30, height: 30, borderRadius: 15, backgroundColor: '#007AFF',
-    justifyContent: 'center', alignItems: 'center', marginRight: 10
-  },
+  avatarPlaceholderSmallest: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   avatarLetterSmallest: { color: 'white', fontWeight: 'bold', fontSize: 12 },
-
-  // --- STORIES TRAY STYLES ---
   storiesWrapper: { backgroundColor: 'white', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
   storyCircleContainer: { alignItems: 'center', marginHorizontal: 8, width: 70 },
-  storyCircle: {
-    width: 64, height: 64, borderRadius: 32, borderWidth: 2.5,
-    justifyContent: 'center', alignItems: 'center', marginBottom: 4
-  },
+  storyCircle: { width: 64, height: 64, borderRadius: 32, borderWidth: 2.5, justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
   storyUsername: { fontSize: 11, color: '#444', textAlign: 'center' },
-  avatarPlaceholderSmall: {
-    width: 54, height: 54, borderRadius: 27, backgroundColor: '#eee',
-    justifyContent: 'center', alignItems: 'center'
-  },
+  avatarPlaceholderSmall: { width: 54, height: 54, borderRadius: 27, backgroundColor: '#eee', justifyContent: 'center', alignItems: 'center' },
   avatarLetterSmall: { fontWeight: 'bold', color: '#777', fontSize: 16 },
-
-  // --- POST CREATION STYLES ---
   createPostContainer: { backgroundColor: 'white', padding: 15, marginBottom: 10, borderBottomWidth: 1, borderBottomColor: '#ddd' },
   editLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
   editLabel: { color: '#007AFF', fontWeight: 'bold', fontSize: 12 },
@@ -739,8 +817,6 @@ const styles = StyleSheet.create({
   previewContainer: { position: 'relative', marginTop: 10 },
   imagePreview: { width: '100%', height: 150, borderRadius: 10 },
   removeImage: { position: 'absolute', top: 5, right: 5, backgroundColor: 'white', borderRadius: 12 },
-
-  // --- FEED / CARD STYLES ---
   card: { backgroundColor: 'white', padding: 15, marginBottom: 8, elevation: 1 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
   userInfo: { flexDirection: 'row', alignItems: 'center' },
@@ -760,16 +836,62 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', justifyContent: 'space-around' },
   actionItem: { flexDirection: 'row', alignItems: 'center' },
   actionText: { marginLeft: 8, color: '#666', fontWeight: '500' },
-
-  // --- STORY VIEWER MODAL STYLES ---
   storyModalContainer: { flex: 1, backgroundColor: 'black' },
   fullStoryImage: { width: '100%', height: '100%' },
   storyHeader: { position: 'absolute', top: 65, left: 15, right: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   storyHeaderUser: { flexDirection: 'row', alignItems: 'center' },
   storyHeaderUsername: { color: 'white', fontWeight: 'bold', marginLeft: 10, fontSize: 16 },
-  multiProgressContainer: { position: 'absolute', top: 50, left: 10, right: 10, flexDirection: 'row', height: 3, gap: 5},
-  progressSegmentBackground: { flex: 1, height: 3, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 2, overflow: 'hidden'},
-  progressSegmentFill: { height: '100%', backgroundColor: 'white'},
+  multiProgressContainer: { position: 'absolute', top: 50, left: 10, right: 10, flexDirection: 'row', height: 3, gap: 5 },
+  progressSegmentBackground: { flex: 1, height: 3, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 2, overflow: 'hidden' },
+  progressSegmentFill: { height: '100%', backgroundColor: 'white' },
   navigationOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', marginTop: 100 },
-  navSide: { flex: 1 }
+  navSide: { flex: 1 },
+  tagRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
+  tagButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#eef6ff', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15, borderWidth: 1, borderColor: '#d0e3ff' },
+  tagButtonActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  tagText: { color: '#007AFF', fontSize: 12, fontWeight: '600', marginLeft: 4 },
+  tagTextActive: { color: 'white' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#eee' },
+  modalTitle: { fontSize: 18, fontWeight: 'bold' },
+  locationItem: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#f9f9f9' },
+  locationIconCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
+  locationItemName: { fontSize: 16, fontWeight: '600', color: '#333' },
+  locationItemSub: { fontSize: 12, color: '#777' },
+  locationMarkerRow: { flexDirection: 'row', alignItems: 'center', marginTop: 1, marginBottom: 2 },
+  locationNameText: { fontSize: 12, color: '#007AFF', fontWeight: '600', marginLeft: 3 },
+  filterNoticeInList: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'white', padding: 12, marginHorizontal: 15, marginBottom: 15, borderRadius: 12, borderWidth: 1, borderColor: '#e0e0e0', elevation: 2, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+  filterNoticeText: { color: '#333', marginLeft: 8, fontSize: 14 },
+  clearFilterBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff5f5', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, marginLeft: 10 },
+  clearText: { color: '#ff3b30', fontSize: 12, fontWeight: 'bold', marginRight: 4 },
+  emptyStateContainer: {
+  marginTop: 40,
+  alignItems: 'center',
+  justifyContent: 'center',
+  paddingHorizontal: 40,
+  },
+  emptyStateTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#444',
+    marginTop: 15,
+  },
+  emptyStateSubtext: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
+  },
+  emptyActionBtn: {
+    marginTop: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    backgroundColor: '#007AFF',
+    borderRadius: 25,
+  },
+  emptyActionText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 14,
+  },
 });
