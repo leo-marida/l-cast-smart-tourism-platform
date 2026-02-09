@@ -1,11 +1,11 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { 
-  View, Text, FlatList, TextInput, TouchableOpacity, 
+import {
+  View, Text, FlatList, TextInput, TouchableOpacity,
   StyleSheet, Alert, Image, Animated, RefreshControl, Modal, Dimensions
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker'; 
+import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
 import { useFocusEffect, useRoute, useNavigation } from '@react-navigation/native';
@@ -17,18 +17,18 @@ export default function SocialFeed() {
   const [posts, setPosts] = useState([]);
   const [stories, setStories] = useState([]);
   const [newPost, setNewPost] = useState('');
-  const [selectedImage, setSelectedImage] = useState(null); 
+  const [selectedImage, setSelectedImage] = useState(null);
   const [visibility, setVisibility] = useState('public'); // NEW: 'public' or 'followers'
-  const [followingIds, setFollowingIds] = useState([]); 
+  const [followingIds, setFollowingIds] = useState([]);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [editingPostId, setEditingPostId] = useState(null);
 
   // --- STORY VIEWER STATE ---
   const [storyVisible, setStoryVisible] = useState(false);
-  const [activeUserIndex, setActiveUserIndex] = useState(0); 
-  const [activeStoryIndex, setActiveStoryIndex] = useState(0); 
-  const [seenStoryIds, setSeenStoryIds] = useState([]); 
+  const [activeUserIndex, setActiveUserIndex] = useState(0);
+  const [activeStoryIndex, setActiveStoryIndex] = useState(0);
+  const [seenStoryIds, setSeenStoryIds] = useState([]);
   const storyProgress = useRef(new Animated.Value(0)).current;
 
   const navigation = useNavigation();
@@ -75,7 +75,7 @@ export default function SocialFeed() {
 
   const handleSearch = (text) => {
     setSearchQuery(text);
-    
+
     if (searchTimer.current) clearTimeout(searchTimer.current);
 
     if (text.trim().length > 0) {
@@ -83,7 +83,11 @@ export default function SocialFeed() {
       searchTimer.current = setTimeout(async () => {
         try {
           const res = await api.get(`/api/social/users/search?query=${text}`);
-          setSearchResults(res.data);
+
+          // --- FIX: Filter out SuperAdmin ---
+          const filteredResults = res.data.filter(user => user.username !== 'SuperAdmin');
+
+          setSearchResults(filteredResults);
         } catch (err) {
           console.error("Search failed", err);
         } finally {
@@ -136,17 +140,17 @@ export default function SocialFeed() {
   const fetchPosts = async () => {
     try {
       // 1. Determine the URL based on whether a filter is active
-      const url = filterPoiId 
-        ? `/api/social/feed?poi_id=${filterPoiId}` 
+      const url = filterPoiId
+        ? `/api/social/feed?poi_id=${filterPoiId}`
         : '/api/social/feed';
 
       const res = await api.get(url);
-      
+
       // 2. Map the data just like you did before
-      const mappedPosts = res.data.map(p => ({ 
-        ...p, 
+      const mappedPosts = res.data.map(p => ({
+        ...p,
         isLiked: p.is_liked || false,
-        comment_count: parseInt(p.comment_count) || 0 
+        comment_count: parseInt(p.comment_count) || 0
       }));
 
       setPosts(mappedPosts);
@@ -155,17 +159,17 @@ export default function SocialFeed() {
       const idsFromServer = res.data
         .filter(p => p.is_following === true)
         .map(p => p.user_id);
-        
+
       setFollowingIds([...new Set(idsFromServer)]);
-      
-    } catch (err) { 
-      console.error("Fetch posts error:", err); 
+
+    } catch (err) {
+      console.error("Fetch posts error:", err);
     }
   };
 
   const fetchMyProfile = async () => {
     try {
-      const res = await api.get('/api/social/user/me/profile'); 
+      const res = await api.get('/api/social/user/me/profile');
       setCurrentUserId(res.data.id);
     } catch (err) { console.log(err); }
   };
@@ -181,7 +185,7 @@ export default function SocialFeed() {
       fetchPosts();
       fetchStories();
       loadSeenStories();
-      fetchPois(); 
+      fetchPois();
     }, [filterPoiId])
   );
 
@@ -261,8 +265,8 @@ export default function SocialFeed() {
       formData.append('image', { uri, name: filename, type });
 
       try {
-        await api.post('/api/social/story', formData, { 
-          headers: { 'Content-Type': 'multipart/form-data' } 
+        await api.post('/api/social/story', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
         });
         fetchStories();
         Alert.alert("Success", "Story posted!");
@@ -287,9 +291,9 @@ export default function SocialFeed() {
     try {
       if (editingPostId) {
         // Update existing post (visibility update optional here)
-        await api.put(`/api/social/post/${editingPostId}`, { 
+        await api.put(`/api/social/post/${editingPostId}`, {
           content: newPost,
-          visibility: visibility 
+          visibility: visibility
         });
         setEditingPostId(null);
       } else {
@@ -298,7 +302,7 @@ export default function SocialFeed() {
         formData.append('visibility', visibility); // NEW: Send visibility to backend
 
         if (selectedLocation) {
-          formData.append('poi_id', selectedLocation.id); 
+          formData.append('poi_id', selectedLocation.id);
         }
 
         if (selectedImage) {
@@ -309,12 +313,12 @@ export default function SocialFeed() {
         }
         await api.post('/api/social/post', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       }
-      setNewPost(''); 
-      setSelectedImage(null); 
+      setNewPost('');
+      setSelectedImage(null);
       setSelectedLocation(null);
       setVisibility('public'); // Reset visibility to default
-      fetchPosts(); 
-    } catch(err) { Alert.alert("Error", "Could not process request."); }
+      fetchPosts();
+    } catch (err) { Alert.alert("Error", "Could not process request."); }
   };
 
   const handlePostOptions = (post) => {
@@ -340,7 +344,7 @@ export default function SocialFeed() {
       }
       return p;
     }));
-    try { await api.post(`/api/social/post/${postId}/like`); } catch(err) { }
+    try { await api.post(`/api/social/post/${postId}/like`); } catch (err) { }
   };
 
   const handleFollow = async (userId) => {
@@ -353,7 +357,7 @@ export default function SocialFeed() {
   };
 
   const navigateToProfile = (targetUserId) => {
-    if (targetUserId === currentUserId) navigation.navigate('Profile'); 
+    if (targetUserId === currentUserId) navigation.navigate('Profile');
     else navigation.navigate('UserProfile', { userId: targetUserId });
   };
 
@@ -373,7 +377,7 @@ export default function SocialFeed() {
               placeholderTextColor="#999"
             />
             {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => {setSearchQuery(''); setSearchResults([]);}}>
+              <TouchableOpacity onPress={() => { setSearchQuery(''); setSearchResults([]); }}>
                 <Ionicons name="close-circle" size={18} color="#999" style={{ marginRight: 10 }} />
               </TouchableOpacity>
             )}
@@ -381,16 +385,16 @@ export default function SocialFeed() {
 
           {/* ACTION BUTTONS */}
           <View style={styles.headerActions}>
-            <TouchableOpacity 
-              style={styles.actionBtn} 
+            <TouchableOpacity
+              style={styles.actionBtn}
               onPress={() => navigation.navigate('Notifications')}
             >
               <Ionicons name="notifications-outline" size={24} color="#333" />
               <View style={styles.unreadBadge} />
             </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.actionBtn} 
+
+            <TouchableOpacity
+              style={styles.actionBtn}
               onPress={() => navigation.navigate('Messages')}
             >
               <Ionicons name="chatbubble-ellipses-outline" size={24} color="#333" />
@@ -404,7 +408,7 @@ export default function SocialFeed() {
                 data={searchResults}
                 keyExtractor={(item) => item.id.toString()}
                 renderItem={({ item }) => (
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={styles.searchResultItem}
                     onPress={() => {
                       setSearchQuery('');
@@ -429,7 +433,7 @@ export default function SocialFeed() {
 
       {/* 2. ANIMATED HEADER - Stories & Post Input disappear on scroll */}
       <Animated.View style={[
-        styles.headerContainer, 
+        styles.headerContainer,
         { transform: [{ translateY: headerTranslate }], top: 50 } // Starts after fixed bar
       ]}>
         {/* STORIES TRAY */}
@@ -450,7 +454,7 @@ export default function SocialFeed() {
             renderItem={({ item, index }) => {
               const hasUnseen = item.stories.some(s => !seenStoryIds.includes(s.id));
               return (
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.storyCircleContainer}
                   onPress={() => openStoryGroup(index)}
                 >
@@ -476,28 +480,28 @@ export default function SocialFeed() {
               </TouchableOpacity>
             </View>
           )}
-          
-          <TextInput 
-            style={styles.postInput} 
-            placeholder={editingPostId ? "Edit your post..." : "What's happening?"} 
-            multiline 
-            value={newPost} 
-            onChangeText={setNewPost} 
+
+          <TextInput
+            style={styles.postInput}
+            placeholder={editingPostId ? "Edit your post..." : "What's happening?"}
+            multiline
+            value={newPost}
+            onChangeText={setNewPost}
           />
 
           {/* VISIBILITY & LOCATION SELECTION ROW */}
           <View style={styles.visibilityRow}>
             <Text style={styles.visibilityLabel}>Visible to:</Text>
-            <TouchableOpacity 
-              style={[styles.visibilityBtn, visibility === 'public' && styles.visibilityBtnActive]} 
+            <TouchableOpacity
+              style={[styles.visibilityBtn, visibility === 'public' && styles.visibilityBtnActive]}
               onPress={() => setVisibility('public')}
             >
               <Ionicons name="globe-outline" size={14} color={visibility === 'public' ? 'white' : '#666'} />
               <Text style={[styles.visibilityBtnText, visibility === 'public' && styles.visibilityBtnTextActive]}>Everyone</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.visibilityBtn, visibility === 'followers' && styles.visibilityBtnActive]} 
+
+            <TouchableOpacity
+              style={[styles.visibilityBtn, visibility === 'followers' && styles.visibilityBtnActive]}
               onPress={() => setVisibility('followers')}
             >
               <Ionicons name="people-outline" size={14} color={visibility === 'followers' ? 'white' : '#666'} />
@@ -505,14 +509,14 @@ export default function SocialFeed() {
             </TouchableOpacity>
 
             {/* Location Toggle Button */}
-            <TouchableOpacity 
-              style={[styles.visibilityBtn, selectedLocation && styles.tagButtonActive]} 
+            <TouchableOpacity
+              style={[styles.visibilityBtn, selectedLocation && styles.tagButtonActive]}
               onPress={() => setLocationModalVisible(true)}
             >
-              <Ionicons 
-                name="location-outline" 
-                size={14} 
-                color={selectedLocation ? 'white' : '#666'} 
+              <Ionicons
+                name="location-outline"
+                size={14}
+                color={selectedLocation ? 'white' : '#666'}
               />
               <Text style={[styles.visibilityBtnText, selectedLocation && styles.visibilityBtnTextActive]}>
                 {selectedLocation ? "Located" : "Location"}
@@ -547,11 +551,11 @@ export default function SocialFeed() {
                 <Text style={styles.iconText}>Photo</Text>
               </TouchableOpacity>
             ) : <View />}
-            
-            <TouchableOpacity 
-              onPress={handlePost} 
+
+            <TouchableOpacity
+              onPress={handlePost}
               style={[
-                styles.publishButton, 
+                styles.publishButton,
                 (!newPost && !selectedImage && !selectedLocation) && styles.disabledButton
               ]}
             >
@@ -580,7 +584,7 @@ export default function SocialFeed() {
                   Posts at <Text style={{ fontWeight: 'bold' }}>{filterPoiName}</Text>
                 </Text>
               </View>
-              <TouchableOpacity 
+              <TouchableOpacity
                 onPress={() => navigation.setParams({ filterPoiId: null, filterPoiName: null })}
                 style={styles.clearFilterBtn}
               >
@@ -594,21 +598,21 @@ export default function SocialFeed() {
         ListEmptyComponent={
           !refreshing ? (
             <View style={styles.emptyStateContainer}>
-              <Ionicons 
-                name={filterPoiId ? "location-outline" : "newspaper-outline"} 
-                size={60} 
-                color="#ccc" 
+              <Ionicons
+                name={filterPoiId ? "location-outline" : "newspaper-outline"}
+                size={60}
+                color="#ccc"
               />
               <Text style={styles.emptyStateTitle}>
                 {filterPoiId ? "No posts here yet" : "Your feed is empty"}
               </Text>
               <Text style={styles.emptyStateSubtext}>
-                {filterPoiId 
+                {filterPoiId
                   ? `Be the first to share something about ${filterPoiName}!`
                   : "Follow some users or post something to get started."}
               </Text>
               {filterPoiId && (
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.emptyActionBtn}
                   onPress={() => navigation.setParams({ filterPoiId: null, filterPoiName: null })}
                 >
@@ -622,13 +626,13 @@ export default function SocialFeed() {
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => {
           const isFollowing = followingIds.includes(item.user_id);
-          const isMe = item.user_id === currentUserId; 
+          const isMe = item.user_id === currentUserId;
 
           return (
             <View style={styles.card}>
               <View style={styles.header}>
-                <TouchableOpacity 
-                  style={styles.userInfo} 
+                <TouchableOpacity
+                  style={styles.userInfo}
                   onPress={() => navigateToProfile(item.user_id)}
                 >
                   <View style={styles.avatarPlaceholder}>
@@ -636,7 +640,7 @@ export default function SocialFeed() {
                   </View>
                   <View>
                     <Text style={styles.username}>@{item.username}</Text>
-                    
+
                     {item.location_name && (
                       <View style={styles.locationMarkerRow}>
                         <Ionicons name="location" size={12} color="#007AFF" />
@@ -646,11 +650,11 @@ export default function SocialFeed() {
 
                     <View style={styles.dateRow}>
                       <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString()}</Text>
-                      <Ionicons 
-                        name={item.visibility === 'followers' ? "people" : "globe-outline"} 
-                        size={12} 
-                        color="#999" 
-                        style={{marginLeft: 5}} 
+                      <Ionicons
+                        name={item.visibility === 'followers' ? "people" : "globe-outline"}
+                        size={12}
+                        color="#999"
+                        style={{ marginLeft: 5 }}
                       />
                     </View>
                   </View>
@@ -675,7 +679,7 @@ export default function SocialFeed() {
                   <Image source={{ uri: `${BASE_URL}${item.image_url}` }} style={styles.postImage} resizeMode="cover" />
                 )}
               </TouchableOpacity>
-              
+
               <View style={styles.divider} />
               <View style={styles.actions}>
                 <TouchableOpacity onPress={() => handleLike(item.id)} style={styles.actionItem}>
@@ -698,20 +702,20 @@ export default function SocialFeed() {
         <View style={styles.storyModalContainer}>
           {stories[activeUserIndex] && (
             <>
-              <Image 
-                source={{ uri: `${BASE_URL}${stories[activeUserIndex].stories[activeStoryIndex].image_url}` }} 
-                style={styles.fullStoryImage} 
+              <Image
+                source={{ uri: `${BASE_URL}${stories[activeUserIndex].stories[activeStoryIndex].image_url}` }}
+                style={styles.fullStoryImage}
                 resizeMode="cover"
               />
-              
+
               <View style={styles.multiProgressContainer}>
                 {stories[activeUserIndex].stories.map((_, idx) => (
                   <View key={idx} style={styles.progressSegmentBackground}>
                     <Animated.View style={[
-                      styles.progressSegmentFill, 
-                      { 
-                        width: idx === activeStoryIndex ? storyProgress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) 
-                              : idx < activeStoryIndex ? '100%' : '0%' 
+                      styles.progressSegmentFill,
+                      {
+                        width: idx === activeStoryIndex ? storyProgress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] })
+                          : idx < activeStoryIndex ? '100%' : '0%'
                       }
                     ]} />
                   </View>
@@ -749,15 +753,15 @@ export default function SocialFeed() {
               <Ionicons name="close" size={28} color="black" />
             </TouchableOpacity>
           </View>
-          <FlatList 
-            data={allLocations} 
-            keyExtractor={(item) => item.id.toString()} 
+          <FlatList
+            data={allLocations}
+            keyExtractor={(item) => item.id.toString()}
             renderItem={({ item }) => (
-              <TouchableOpacity 
-                style={styles.locationItem} 
-                onPress={() => { 
-                  setSelectedLocation({ id: item.id, name: item.name }); 
-                  setLocationModalVisible(false); 
+              <TouchableOpacity
+                style={styles.locationItem}
+                onPress={() => {
+                  setSelectedLocation({ id: item.id, name: item.name });
+                  setLocationModalVisible(false);
                 }}
               >
                 <View style={styles.locationIconCircle}>
@@ -768,7 +772,7 @@ export default function SocialFeed() {
                   <Text style={styles.locationItemSub}>{item.region || item.category}</Text>
                 </View>
               </TouchableOpacity>
-            )} 
+            )}
           />
         </SafeAreaView>
       </Modal>
@@ -864,10 +868,10 @@ const styles = StyleSheet.create({
   clearFilterBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff5f5', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, marginLeft: 10 },
   clearText: { color: '#ff3b30', fontSize: 12, fontWeight: 'bold', marginRight: 4 },
   emptyStateContainer: {
-  marginTop: 40,
-  alignItems: 'center',
-  justifyContent: 'center',
-  paddingHorizontal: 40,
+    marginTop: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
   },
   emptyStateTitle: {
     fontSize: 18,

@@ -10,7 +10,9 @@ const { Pool } = require('pg');
 // 1. IMPORT ROUTES
 const socialRoutes = require('./routes/socialRoutes');
 // const poiRoutes = require('./routes/poiRoutes'); // Uncomment this if you have a poiRoutes file
-const adminRoutes = require('./routes/adminRoutes'); 
+const adminRoutes = require('./routes/adminRoutes');
+const messagesRoutes = require('./routes/messages');
+
 const app = express();
 
 // 2. MIDDLEWARE

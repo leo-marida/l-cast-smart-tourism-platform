@@ -18,7 +18,8 @@ import UserListScreen from './src/screens/UserListScreen';
 import PostDetail from './src/screens/PostDetail';
 import UserProfileScreen from './src/screens/UserProfileScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
-import MessagesScreen from './src/screens/MessagesScreen'
+import MessagesScreen from './src/screens/MessagesScreen'; 
+import ChatScreen from './src/screens/ChatScreen'; // <--- FIX: Ensure path is ./src/screens/
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -81,27 +82,49 @@ export default function App() {
           })} 
         />
 
-        {/* 2. ADD POST DETAIL SCREEN HERE */}
         <Stack.Screen 
           name="PostDetail" 
           component={PostDetail} 
-          options={{ 
-            title: 'Post', 
-            headerShown: true // Allow user to go back to the feed
-          }} 
+          options={{ title: 'Post', headerShown: true }} 
         />
+        
         <Stack.Screen 
           name="Notifications" 
           component={NotificationsScreen} 
           options={{ 
             title: 'Notifications',
-            headerShown: true, // You want a back button here
+            headerShown: true,
             headerTintColor: '#007AFF',
             headerTitleStyle: { fontWeight: 'bold', color: '#333' }
           }} 
         />
-        <Stack.Screen name="UserProfile" component={UserProfileScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="Messages" component={MessagesScreen} />
+        
+        <Stack.Screen 
+          name="UserProfile" 
+          component={UserProfileScreen} 
+          options={{ headerShown: false }} 
+        />
+        
+        {/* --- MESSAGING SCREENS --- */}
+        <Stack.Screen 
+            name="Messages" 
+            component={MessagesScreen} 
+            options={{ 
+                title: 'Inbox',
+                headerShown: true 
+            }}
+        />
+        
+        <Stack.Screen 
+            name="ChatScreen" 
+            component={ChatScreen} 
+            options={({ route }) => ({ 
+                title: route.params?.username || 'Chat', // Shows the other person's name
+                headerShown: true,
+                headerBackTitleVisible: false
+            })}
+        />
+
       </Stack.Navigator>
     </NavigationContainer>
   );

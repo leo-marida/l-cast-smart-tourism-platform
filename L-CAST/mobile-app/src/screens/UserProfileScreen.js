@@ -14,6 +14,7 @@ export default function UserProfileScreen({ route, navigation }) {
   const [savedPlaces, setSavedPlaces] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
+  const [isMe, setIsMe] = useState(false); // <--- NEW: Track if this is my profile
   const [activeTab, setActiveTab] = useState('posts'); 
   const BASE_URL = api.defaults.baseURL;
 
@@ -24,18 +25,24 @@ export default function UserProfileScreen({ route, navigation }) {
   const loadUserProfile = async () => {
     setRefreshing(true);
     try {
+      // 0. Determine if this is "Me"
+      const meRes = await api.get('/api/social/user/me/profile');
+      // Compare IDs (ensure types match, e.g., both integers)
+      const isCurrentUser = meRes.data.id === parseInt(userId);
+      setIsMe(isCurrentUser);
+
       // 1. Profile Details (Stats & Bio)
       const res = await api.get(`/api/social/user/${userId}/profile`);
       setProfile(res.data);
       setIsFollowing(res.data.is_following);
 
-      // 2. User's Posts (Independent try/catch)
+      // 2. User's Posts
       try {
         const postsRes = await api.get(`/api/social/user/${userId}/posts`);
         setUserPosts(postsRes.data);
       } catch (e) { console.error("Posts Fetch Error:", e.message); }
 
-      // 3. User's Saved Places (Using your itineraries logic)
+      // 3. User's Saved Places
       try {
         const savedRes = await api.get(`/api/social/user/${userId}/saved-places`);
         setSavedPlaces(savedRes.data);
@@ -56,12 +63,22 @@ export default function UserProfileScreen({ route, navigation }) {
         await api.post(`/api/social/user/${userId}/follow`);
       }
       setIsFollowing(!isFollowing);
-      // Refresh to update follower counts
-      const res = await api.get(`/api/social/user/${userId}/profile`);
-      setProfile(res.data);
+      // Update follower count locally for immediate UI feedback
+      setProfile(prev => ({
+          ...prev,
+          followersCount: isFollowing ? prev.followersCount - 1 : prev.followersCount + 1
+      }));
     } catch (e) {
       console.error(e);
     }
+  };
+
+  // <--- NEW: Handle Message Button Click
+  const handleMessage = () => {
+    navigation.navigate('ChatScreen', {
+        userId: profile.id,
+        username: profile.username
+    });
   };
 
   const handleLike = async (postId) => {
@@ -113,18 +130,30 @@ export default function UserProfileScreen({ route, navigation }) {
           </View>
         </View>
 
-        {/* 1: BIO & ACTION BUTTON */}
+        {/* 1: BIO & ACTION BUTTONS */}
         <View style={styles.bioSection}>
             <View style={styles.bioHeader}>
                 <Text style={styles.bioUsername}>{profile.username}</Text>
-                <TouchableOpacity 
-                    style={[styles.followBtn, isFollowing && styles.unfollowBtn]} 
-                    onPress={handleFollowToggle}
-                >
-                    <Text style={[styles.followBtnText, isFollowing && styles.unfollowBtnText]}>
-                        {isFollowing ? 'Following' : 'Follow'}
-                    </Text>
-                </TouchableOpacity>
+                
+                {/* <--- UPDATED: Action Buttons Row (Only show if not Me) */}
+                {!isMe && (
+                  <View style={styles.actionRow}>
+                    {/* Message Button */}
+                    <TouchableOpacity style={styles.messageBtn} onPress={handleMessage}>
+                        <Ionicons name="chatbubble-ellipses-outline" size={20} color="#007AFF" />
+                    </TouchableOpacity>
+
+                    {/* Follow Button */}
+                    <TouchableOpacity 
+                        style={[styles.followBtn, isFollowing && styles.unfollowBtn]} 
+                        onPress={handleFollowToggle}
+                    >
+                        <Text style={[styles.followBtnText, isFollowing && styles.unfollowBtnText]}>
+                            {isFollowing ? 'Following' : 'Follow'}
+                        </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
             </View>
             <Text style={styles.bioText}>{profile.bio || "No bio yet."}</Text>
         </View>
@@ -223,20 +252,29 @@ const styles = StyleSheet.create({
   statItem: { alignItems: 'center' },
   statNumber: { fontSize: 20, fontWeight: 'bold' },
   statLabel: { fontSize: 13, color: '#666' },
+  
   bioSection: { paddingHorizontal: 20, paddingBottom: 20, backgroundColor: '#fff' },
   bioHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
   bioUsername: { fontWeight: 'bold', fontSize: 16 },
-  bioText: { color: '#444', fontSize: 14, lineHeight: 20 },
-  followBtn: { backgroundColor: '#007AFF', paddingHorizontal: 20, paddingVertical: 6, borderRadius: 15 },
+  
+  // <--- UPDATED STYLES FOR BUTTON ROW
+  actionRow: { flexDirection: 'row', alignItems: 'center' },
+  messageBtn: { marginRight: 10, padding: 8, borderRadius: 20, backgroundColor: '#f0f8ff', borderWidth: 1, borderColor: '#007AFF' },
+  
+  followBtn: { backgroundColor: '#007AFF', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20 },
   unfollowBtn: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc' },
   followBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
   unfollowBtnText: { color: '#333' },
+  
+  bioText: { color: '#444', fontSize: 14, lineHeight: 20, marginTop: 5 },
+  
   tabContainer: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee', borderBottomWidth: 1, borderBottomColor: '#eee' },
   tabButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
   activeTab: { borderBottomWidth: 2, borderBottomColor: '#007AFF' },
   tabLabel: { marginLeft: 8, fontWeight: '600', color: '#888', fontSize: 14 },
   contentList: { paddingVertical: 10 },
   emptyText: { textAlign: 'center', color: '#888', marginTop: 40, fontStyle: 'italic' },
+  
   feedCard: { backgroundColor: '#fff', marginBottom: 10, padding: 15 },
   feedCardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   miniAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
@@ -248,6 +286,7 @@ const styles = StyleSheet.create({
   cardActions: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#f0f0f0', paddingTop: 12 },
   actionBtn: { flexDirection: 'row', alignItems: 'center', marginRight: 25 },
   actionCount: { marginLeft: 6, color: '#666', fontWeight: '500' },
+  
   savedCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', padding: 15, marginBottom: 1, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
   savedInfo: { flexDirection: 'row', alignItems: 'center' },
   locationIcon: { backgroundColor: '#007AFF', padding: 8, borderRadius: 20 },
