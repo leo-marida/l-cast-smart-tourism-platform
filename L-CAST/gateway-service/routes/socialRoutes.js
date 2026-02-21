@@ -13,11 +13,13 @@ const pool = new Pool({
     database: process.env.POSTGRES_DB
 });
 
-// --- MULTER CONFIGURATION ---
-const uploadDir = 'uploads/';
-const storiesDir = 'uploads/stories/';
+// We go UP one level from the app root to find the real volume
+const uploadBase = path.join(process.cwd(), '..', 'uploads'); 
+const postsDir = path.join(uploadBase, 'posts');
+const storiesDir = path.join(uploadBase, 'stories');
 
-[uploadDir, storiesDir].forEach(dir => {
+// Ensure directories exist
+[postsDir, storiesDir].forEach(dir => {
     if (!fs.existsSync(dir)){
         fs.mkdirSync(dir, { recursive: true });
     }
@@ -25,7 +27,8 @@ const storiesDir = 'uploads/stories/';
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        const dest = req.path.includes('story') ? storiesDir : uploadDir;
+        // Use req.path to decide the folder
+        const dest = req.path.includes('story') ? storiesDir : postsDir;
         cb(null, dest);
     },
     filename: (req, file, cb) => {
@@ -175,7 +178,7 @@ router.get('/feed', auth, async (req, res) => {
 router.post('/post', auth, upload.single('image'), async (req, res) => {
     const { content, poi_id, visibility = 'public' } = req.body;
     const userId = req.user.id;
-    const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
+    const imageUrl = req.file ? `/uploads/posts/${req.file.filename}` : null;
 
     try {
         const result = await pool.query(
