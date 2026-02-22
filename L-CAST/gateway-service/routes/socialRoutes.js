@@ -481,4 +481,31 @@ router.get('/pois', auth, async (req, res) => {
     }
 });
 
+// Mark all notifications as read for the current user
+router.post('/notifications/mark-read', auth, async (req, res) => {
+    try {
+        await pool.query(
+            'UPDATE notifications SET is_read = true WHERE recipient_id = $1 AND is_read = false',
+            [req.user.id]
+        );
+        res.json({ success: true, message: "Notifications marked as read" });
+    } catch (err) {
+        console.error("Error marking notifications read:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Optional: Also add the unread count route to feed the red dot logic
+router.get('/notifications/unread-count', auth, async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT COUNT(*) FROM notifications WHERE recipient_id = $1 AND is_read = false',
+            [req.user.id]
+        );
+        res.json({ count: parseInt(result.rows[0].count) });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

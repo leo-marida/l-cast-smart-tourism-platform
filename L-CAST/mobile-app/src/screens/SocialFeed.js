@@ -54,6 +54,18 @@ export default function SocialFeed() {
   const filterPoiId = route.params?.filterPoiId;
   const filterPoiName = route.params?.filterPoiName;
 
+  const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
+
+  const checkNotifications = async () => {
+  try {
+    const res = await api.get('/api/social/notifications/unread-count');
+    // If the backend returns a count > 0, show the red dot
+    setHasUnreadNotifications(res.data.count > 0);
+  } catch (err) {
+    console.log("Check notifications error:", err);
+  }
+};
+
   const handleScroll = Animated.event(
     [{ nativeEvent: { contentOffset: { y: scrollY } } }],
     {
@@ -186,6 +198,7 @@ export default function SocialFeed() {
       fetchStories();
       loadSeenStories();
       fetchPois();
+      checkNotifications();
     }, [filterPoiId])
   );
 
@@ -387,10 +400,24 @@ export default function SocialFeed() {
           <View style={styles.headerActions}>
             <TouchableOpacity
               style={styles.actionBtn}
-              onPress={() => navigation.navigate('Notifications')}
+              onPress={async () => {
+                // 1. Hide the red dot locally immediately (Better UX)
+                setHasUnreadNotifications(false); 
+                
+                // 2. Navigate to the notifications screen
+                navigation.navigate('Notifications');
+
+                // 3. Tell the backend to mark them as read in the database
+                try {
+                  await api.post('/api/social/notifications/mark-read');
+                } catch (err) {
+                  console.error("Failed to mark notifications as read:", err);
+                }
+              }}
             >
               <Ionicons name="notifications-outline" size={24} color="#333" />
-              <View style={styles.unreadBadge} />
+              {/* Show the dot only if the state is true */}
+              {hasUnreadNotifications && <View style={styles.unreadBadge} />}
             </TouchableOpacity>
 
             <TouchableOpacity
