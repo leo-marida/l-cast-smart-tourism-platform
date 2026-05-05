@@ -9,6 +9,7 @@ import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
 import { useFocusEffect, useRoute, useNavigation } from '@react-navigation/native';
+import socket from '../services/socket'; // Your socket path
 
 const STORAGE_KEY = '@seen_stories';
 const { width } = Dimensions.get('window');
@@ -32,6 +33,8 @@ export default function SocialFeed() {
   const storyProgress = useRef(new Animated.Value(0)).current;
 
   const navigation = useNavigation();
+  const [hasUnread, setHasUnread] = useState(false); // <--- NEW STATE
+  const [myId, setMyId] = useState(null);
   const BASE_URL = api.defaults.baseURL;
 
   // --- HEADER ANIMATION LOGIC ---
@@ -186,6 +189,7 @@ export default function SocialFeed() {
       fetchStories();
       loadSeenStories();
       fetchPois();
+      checkUnread(); 
     }, [filterPoiId])
   );
 
@@ -361,6 +365,53 @@ export default function SocialFeed() {
     else navigation.navigate('UserProfile', { userId: targetUserId });
   };
 
+  const checkUnread = async () => {
+    try {
+      // 1. Get ID from storage if state is empty (failsafe)
+      let currentId = myId;
+      if (!currentId) {
+         const userStr = await AsyncStorage.getItem('user');
+         if (userStr) currentId = JSON.parse(userStr).id;
+      }
+      if (!currentId) return;
+
+      // 2. Check API
+      const res = await api.get('/api/messages/conversations');
+      // Show dot if: Sender is NOT me AND is_read is false
+      const unreadExists = res.data.some(c => c.sender_id != currentId && !c.is_read);
+      setHasUnread(unreadExists);
+      
+      // 3. While we are here, ensure socket is connected
+      if (!socket.connected) {
+          socket.connect();
+          socket.emit('join', currentId);
+      }
+    } catch (e) { console.log("Unread check failed", e); }
+};
+
+// --- ADD THIS FUNCTION ---
+  const handleOpenMessages = () => {
+    // 1. Hide the red dot immediately for better UX
+    setHasUnread(false); 
+    // 2. Navigate to the Messages Screen
+    navigation.navigate('Messages'); 
+  };
+
+// NEW: Listen for incoming messages while on Feed
+  useEffect(() => {
+    if (!myId) return;
+
+    const handleNewMessage = (newMsg) => {
+        // If I am NOT the sender, show the red dot
+        if (newMsg.sender_id != myId) {
+            setHasUnread(true);
+        }
+    };
+
+    socket.on('receive_message', handleNewMessage);
+    return () => { socket.off('receive_message', handleNewMessage); };
+  }, [myId]);
+
   return (
     <View style={styles.container}>
       {/* 1. FIXED TOP BAR - Stays at the top while scrolling */}
@@ -395,9 +446,18 @@ export default function SocialFeed() {
 
             <TouchableOpacity
               style={styles.actionBtn}
-              onPress={() => navigation.navigate('Messages')}
+              onPress={handleOpenMessages} // <--- Use the new handler
             >
-              <Ionicons name="chatbubble-ellipses-outline" size={24} color="#333" />
+              <View>
+                <Ionicons name="chatbubble-ellipses-outline" size={24} color="#333" />
+
+                {/* RED DOT BADGE */}
+                {hasUnread && (
+                  <View style={styles.badgeContainer}>
+                    <View style={styles.badge} />
+                  </View>
+                )}
+              </View>
             </TouchableOpacity>
           </View>
 
@@ -897,5 +957,20 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: '600',
     fontSize: 14,
+  },
+  // ... existing styles
+  badgeContainer: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: '#fff', // White border effect
+    borderRadius: 6,
+    padding: 1, // Creates the border width
+  },
+  badge: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FF3B30', // System Red
   },
 });
