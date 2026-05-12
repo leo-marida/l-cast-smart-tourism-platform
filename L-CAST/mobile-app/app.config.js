@@ -12,6 +12,13 @@ export default {
       image: "./assets/splash.png",
       resizeMode: "contain",
     },
+
+    extra: {
+      eas: {
+        projectId: "81c161e0-e505-49cc-8d75-604cb26b4c2f"
+      }
+    },
+
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.lcast.app",
